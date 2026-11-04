@@ -81,7 +81,16 @@ if(NOT SDL3_FOUND)
     GIT_TAG ${GT3R_SDL_TAG}
     GIT_SHALLOW ${GT3R_SDL_SHALLOW}
     ${GT3R_SDL_PATCH})
-  FetchContent_MakeAvailable(SDL3)
+  if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+    # SDL's UWP code is C++/CX (/ZW), which MSVC refuses with /std:c++20: SDL gets C++17 while
+    # the game keeps C++20.
+    set(_gt3r_cxx_std ${CMAKE_CXX_STANDARD})
+    set(CMAKE_CXX_STANDARD 17)
+    FetchContent_MakeAvailable(SDL3)
+    set(CMAKE_CXX_STANDARD ${_gt3r_cxx_std})
+  else()
+    FetchContent_MakeAvailable(SDL3)
+  endif()
   if(GT3R_LIBTOOL_QUIET AND TARGET SDL3-static)
     set_target_properties(SDL3-static PROPERTIES STATIC_LIBRARY_OPTIONS ${GT3R_LIBTOOL_QUIET})
   endif()
