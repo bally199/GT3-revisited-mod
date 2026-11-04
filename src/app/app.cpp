@@ -24,6 +24,10 @@
 #include <cstring>
 #include <filesystem>
 
+#if GT3R_UWP && GT3R_GLES
+SDL_WindowFlags gt3r_gl_window_flags(); // render/gpu_gles.cpp
+#endif
+
 namespace gt3r {
 
 namespace {
@@ -128,6 +132,15 @@ bool App::init(int argc, char** argv) {
         win_flags &= ~SDL_WINDOW_FULLSCREEN;
     }
     touch_ui_ = platform::is_mobile() || phone_sim_;
+#if GT3R_UWP && GT3R_GLES
+    // Xbox: the window has its OpenGL ES 3.0 (ANGLE) surface from the start. Otherwise SDL's
+    // OpenGL ES renderer destroys and recreates the window to add it, which SDL's WinRT driver
+    // (one CoreWindow, set up once) does not survive: EGL ends up unloaded and the D3D11
+    // fallback never shows a frame.
+    window_ = SDL_CreateWindow("GT3 Revisited", 1280, 720, win_flags | gt3r_gl_window_flags());
+    if (!window_) LOG_WARN("No OpenGL ES window (%s); 2D only", SDL_GetError());
+    if (!window_)
+#endif
     window_ = SDL_CreateWindow("GT3 Revisited", phone_sim_ ? 1170 : 1280, phone_sim_ ? 540 : 720, win_flags);
     if (!window_) {
         LOG_ERROR("Window creation failed: %s", SDL_GetError());
@@ -279,6 +292,7 @@ bool App::init(int argc, char** argv) {
     updates().startup(*this, auto_shot_path_.empty() || (uc && *uc == '1'));
     reset_dynamic_scale();
     last_ticks_ = SDL_GetTicksNS();
+    LOG_INFO("Started (%s)", disc_ ? "disc open" : "no disc yet");
     return true;
 }
 
@@ -836,6 +850,11 @@ SDL_AppResult App::iterate() {
     if (gamma_frame_) gamma_pass_->end(gamma_); // (after the screenshots: they keep GT3's colours)
     const Uint64 present_start = SDL_GetTicksNS();
     SDL_RenderPresent(renderer_);
+#if GT3R_UWP
+    // gt3r.log: whether frames reach the TV at all (the splash screen stays until the first).
+    static int presented = 0;
+    if (++presented == 1 || presented == 300) LOG_INFO("Frame %d presented", presented);
+#endif
     if (gpu_) gpu_->frame_presented();
     const double present_ms = double(SDL_GetTicksNS() - present_start) / 1e6;
     // A lost GPU (Vulkan's VK_ERROR_DEVICE_LOST, which SDL only reports in its error text) never
