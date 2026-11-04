@@ -30,7 +30,7 @@
   </Resources>
 
   <Applications>
-    <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="$targetentrypoint$">
+    <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="GT3Revisited.App">
       <uap:VisualElements
         DisplayName="GT3 Revisited"
         Description="Gran Turismo 3 A-Spec engine reimplementation (bring your own disc)"
