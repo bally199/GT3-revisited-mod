@@ -1,13 +1,15 @@
 name: xbox-uwp
 
-# The UWP package for Xbox Dev Mode (docs/dev/XBOX.md), on manual runs and on pushes that touch
-# the UWP files. It is signed with a throwaway self-signed certificate made here; the artifact
-# holds the .msix, its .cer and the VCLibs framework package that Device Portal also needs.
+# The UWP package for Xbox Dev Mode (docs/dev/XBOX.md), on manual runs, every push to the
+# xbox-uwp branch, and pull requests that touch the UWP files. It is signed with a throwaway
+# self-signed certificate made here; the artifact holds the .msix, its .cer and the VCLibs framework package that Device Portal also needs.
 # ANGLE for UWP (packaging/uwp/angle-uwp.ps1, 20-30 min) is kept in the cache.
 
 on:
   workflow_dispatch:
   push:
+    branches: [xbox-uwp]
+  pull_request:
     paths:
       - 'cmake/Uwp.cmake'
       - 'cmake/patches/sdl-uwp.patch'
