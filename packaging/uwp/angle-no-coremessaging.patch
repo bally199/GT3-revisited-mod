@@ -1,0 +1,24 @@
+diff --git a/src/libANGLE/renderer/d3d/d3d11/converged/CompositorNativeWindow11.cpp b/src/libANGLE/renderer/d3d/d3d11/converged/CompositorNativeWindow11.cpp
+index 0e64f78d5..867706f1e 100644
+--- a/src/libANGLE/renderer/d3d/d3d11/converged/CompositorNativeWindow11.cpp
++++ b/src/libANGLE/renderer/d3d/d3d11/converged/CompositorNativeWindow11.cpp
+@@ -248,7 +248,9 @@ RoHelper::RoHelper()
+     mFpWindowsDeleteString             = &::WindowsDeleteString;
+     mFpGetActivationFactory            = &::RoGetActivationFactory;
+     mFpWindowsCompareStringOrdinal     = &::WindowsCompareStringOrdinal;
+-    mFpCreateDispatcherQueueController = &::CreateDispatcherQueueController;
++    // GT3 Revisited (Xbox): no static import of CoreMessaging.dll's desktop-only
++    // CreateDispatcherQueueController; the composition window that needs it is not used on UWP.
++    mFpCreateDispatcherQueueController = nullptr;
+     mWinRtAvailable                    = true;
+ #else
+ 
+@@ -428,7 +430,7 @@ HRESULT RoHelper::CreateDispatcherQueueController(
+     DispatcherQueueOptions options,
+     ABI::Windows::System::IDispatcherQueueController **dispatcherQueueController)
+ {
+-    if (!mWinRtAvailable)
++    if (!mWinRtAvailable || !mFpCreateDispatcherQueueController)
+     {
+         return E_FAIL;
+     }

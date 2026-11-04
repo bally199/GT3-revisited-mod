@@ -25,7 +25,14 @@
 #include <filesystem>
 
 #if GT3R_UWP && GT3R_GLES
+#include <SDL3/SDL_loadso.h>
 SDL_WindowFlags gt3r_gl_window_flags(); // render/gpu_gles.cpp
+#endif
+// Xbox: gt3r.log names each startup step (no debugger to see where a start stops).
+#if GT3R_UWP
+#define UWP_STEP(name) LOG_INFO("Startup: %s", name)
+#else
+#define UWP_STEP(name) ((void)0)
 #endif
 
 namespace gt3r {
@@ -133,6 +140,16 @@ bool App::init(int argc, char** argv) {
     }
     touch_ui_ = platform::is_mobile() || phone_sim_;
 #if GT3R_UWP && GT3R_GLES
+    // gt3r.log: whether Windows loads ANGLE's DLLs from the package, and if not, why (a
+    // missing DLL or a missing function in one).
+    for (const char* dll : {"z.dll", "libGLESv2.dll", "libEGL.dll"}) {
+        if (SDL_SharedObject* h = SDL_LoadObject(dll)) {
+            LOG_INFO("Loaded %s", dll);
+            SDL_UnloadObject(h);
+        } else {
+            LOG_WARN("Cannot load %s: %s", dll, SDL_GetError());
+        }
+    }
     // Xbox: the window has its OpenGL ES 3.0 (ANGLE) surface from the start. Otherwise SDL's
     // OpenGL ES renderer destroys and recreates the window to add it, which SDL's WinRT driver
     // (one CoreWindow, set up once) does not survive: EGL ends up unloaded and the D3D11
@@ -232,15 +249,19 @@ bool App::init(int argc, char** argv) {
     layout_ui(false);
     LOG_INFO("Renderer: %s", SDL_GetRendererName(renderer_));
     if (limit_60fps()) apply_frame_limit();
+    UWP_STEP("UI");
     ui_ = std::make_unique<Ui>(renderer_);
 
+    UWP_STEP("input");
     input_ = std::make_unique<InputManager>();
     input_->load(config_);
     touch_.load(config_);
+    UWP_STEP("music");
     SDL_CreateDirectory(default_music_dir().c_str());
     music_.set_playlist_file(data_dir_ + "music_playlist.txt");
     music_.set_song_list_file(data_dir_ + "music_songs.txt");
     follow_music_folder(false);
+    UWP_STEP("audio");
     audio_ = std::make_unique<AudioEngine>(config_.get("audio", "device").value_or(""));
     if (auto vol = config_.get("audio", "music_volume")) audio_->set_music_volume(std::strtof(vol->c_str(), nullptr));
     if (auto vol = config_.get("audio", "sfx_volume")) audio_->set_sfx_volume(std::strtof(vol->c_str(), nullptr));
@@ -274,8 +295,10 @@ bool App::init(int argc, char** argv) {
         }
         else if (!a.empty() && a[0] != '-') disc_path = a;
     }
+    UWP_STEP("disc");
     if (!disc_path.empty()) last_error_ = open_disc(disc_path);
     else open_saved_disc(config_.get("game", "disc").value_or(""));
+    UWP_STEP("screens");
     push(disc_ ? make_hub_screen() : make_setup_screen());
     // Normal start is the game itself (opening movie, then the title menu);
     // the home menu sits underneath (backing out of the title menu shows it).
@@ -288,6 +311,7 @@ bool App::init(int argc, char** argv) {
             if (screen == entry.id && (disc_ || !entry.needs_disc)) push(entry.factory());
     // The update check (README "Online"; [online] update_check): in the background, never waited for.
     // --shot runs use only the cached answer (no traffic to a live server) unless GT3R_UPDATE_CHECK=1.
+    UWP_STEP("update check");
     const char* uc = SDL_getenv("GT3R_UPDATE_CHECK");
     updates().startup(*this, auto_shot_path_.empty() || (uc && *uc == '1'));
     reset_dynamic_scale();

@@ -28,7 +28,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: angle-uwp
-          key: angle-uwp-${{ hashFiles('packaging/uwp/angle-uwp.ps1') }}
+          key: angle-uwp-${{ hashFiles('packaging/uwp/angle-uwp.ps1', 'packaging/uwp/angle-*.patch') }}
       - name: Build ANGLE for UWP
         if: steps.angle.outputs.cache-hit != 'true'
         shell: pwsh
@@ -38,7 +38,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: angle-uwp
-          key: angle-uwp-${{ hashFiles('packaging/uwp/angle-uwp.ps1') }}
+          key: angle-uwp-${{ hashFiles('packaging/uwp/angle-uwp.ps1', 'packaging/uwp/angle-*.patch') }}
       - name: Signing certificate (self-signed, this run only)
         shell: pwsh
         run: ./packaging/uwp/make-cert.ps1 -Out "$env:RUNNER_TEMP\gt3r-dev.pfx" -Password gt3r
