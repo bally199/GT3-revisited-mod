@@ -19,9 +19,11 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+      # Restore and save separately: actions/cache saves only when the whole job succeeds, and
+      # ANGLE (20-30 min) should be kept even when a later step fails.
       - name: ANGLE for UWP (cache)
         id: angle
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: angle-uwp
           key: angle-uwp-${{ hashFiles('packaging/uwp/angle-uwp.ps1') }}
@@ -29,6 +31,12 @@ jobs:
         if: steps.angle.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./packaging/uwp/angle-uwp.ps1
+      - name: Save ANGLE for UWP
+        if: steps.angle.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: angle-uwp
+          key: angle-uwp-${{ hashFiles('packaging/uwp/angle-uwp.ps1') }}
       - name: Signing certificate (self-signed, this run only)
         shell: pwsh
         run: ./packaging/uwp/make-cert.ps1 -Out "$env:RUNNER_TEMP\gt3r-dev.pfx" -Password gt3r
