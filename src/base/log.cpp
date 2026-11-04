@@ -4,6 +4,14 @@
 
 #include <cstdio>
 
+#if GT3R_UWP
+#include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_stdinc.h>
+
+#include <mutex>
+#include <string>
+#endif
+
 namespace gt3r {
 
 static LogLevel g_level = LogLevel::Info;
@@ -27,6 +35,27 @@ void log_message(LogLevel level, const char* fmt, ...) {
     case LogLevel::Error: prio = SDL_LOG_PRIORITY_ERROR; break;
     }
     SDL_LogMessage(SDL_LOG_CATEGORY_APPLICATION, prio, "%s", buf);
+#if GT3R_UWP
+    // Xbox: no console, and SDL's log goes to the debugger only, so the log is also written to
+    // gt3r.log in the user data folder (LocalState; Device Portal's File explorer shows it),
+    // started afresh at each launch.
+    static std::mutex mutex;
+    static std::FILE* file = nullptr;
+    static bool tried = false;
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!tried) {
+        tried = true;
+        if (char* dir = SDL_GetPrefPath("GT3Revisited", "GT3Revisited")) {
+            file = std::fopen((std::string(dir) + "gt3r.log").c_str(), "w");
+            SDL_free(dir);
+        }
+    }
+    if (file) {
+        static const char* const kLevels[] = {"DEBUG", "INFO", "WARN", "ERROR"};
+        std::fprintf(file, "%s: %s\n", kLevels[int(level)], buf);
+        std::fflush(file);
+    }
+#endif
 }
 
 } // namespace gt3r

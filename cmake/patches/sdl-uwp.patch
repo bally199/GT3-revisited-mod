@@ -1,0 +1,101 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9998abe..1c50443 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -2466,10 +2466,10 @@ endif()
+   set(HAVE_SDL_TIMERS TRUE)
+ 
+   set(SDL_LOADSO_WINDOWS 1)
+-  if(NOT WINDOWS_STORE)
+-    sdl_glob_sources("${SDL3_SOURCE_DIR}/src/loadso/windows/*.c")
+-    set(HAVE_SDL_LOADSO TRUE)
+-  endif()
++  # GT3 Revisited: UWP too (the file uses LoadPackagedLibrary there), as the fork's own
++  # VisualC-WinRT project does; without it EGL/ANGLE cannot be loaded.
++  sdl_glob_sources("${SDL3_SOURCE_DIR}/src/loadso/windows/*.c")
++  set(HAVE_SDL_LOADSO TRUE)
+ 
+   if(NOT WINDOWS_STORE)
+     sdl_glob_sources(
+@@ -3526,6 +3526,14 @@ if (SDL_DIALOG)
+   elseif(WINDOWS AND NOT WINDOWS_STORE)
+     sdl_sources(${SDL3_SOURCE_DIR}/src/dialog/windows/SDL_windowsdialog.c)
+     set(HAVE_SDL_DIALOG TRUE)
++  elseif(WINDOWS_STORE)
++    # GT3 Revisited: the UWP file picker, as the fork's VisualC-WinRT project builds it. The
++    # pickers use C++/WinRT, which needs C++17.
++    sdl_sources(${SDL3_SOURCE_DIR}/src/dialog/winrt/SDL_winrtdialog.c
++                ${SDL3_SOURCE_DIR}/src/dialog/winrt/SDL_winrt_pickers.cpp)
++    set_source_files_properties(${SDL3_SOURCE_DIR}/src/dialog/winrt/SDL_winrt_pickers.cpp
++                                PROPERTIES COMPILE_OPTIONS "/std:c++17")
++    set(HAVE_SDL_DIALOG TRUE)
+   elseif(MACOS)
+     sdl_sources(${SDL3_SOURCE_DIR}/src/dialog/cocoa/SDL_cocoadialog.m)
+     set(HAVE_SDL_DIALOG TRUE)
+diff --git a/src/core/winrt/SDL_winrtapp_direct3d.cpp b/src/core/winrt/SDL_winrtapp_direct3d.cpp
+index 5b8817c..0bdffb8 100644
+--- a/src/core/winrt/SDL_winrtapp_direct3d.cpp
++++ b/src/core/winrt/SDL_winrtapp_direct3d.cpp
+@@ -257,6 +257,11 @@ void SDL_WinRTApp::SetWindow(CoreWindow ^ window)
+             window->Bounds.Height);
+ #endif
+ 
++    // GT3 Revisited: the whole screen, not the TV-safe "visible bounds" UWP apps get on Xbox by
++    // default, so the CoreWindow (ANGLE's swap chain) matches the size SDL reports.
++    Windows::UI::ViewManagement::ApplicationView::GetForCurrentView()->SetDesiredBoundsMode(
++        Windows::UI::ViewManagement::ApplicationViewBoundsMode::UseCoreWindow);
++
+     window->SizeChanged +=
+         ref new TypedEventHandler<CoreWindow ^, WindowSizeChangedEventArgs ^>(this, &SDL_WinRTApp::OnWindowSizeChanged);
+ 
+diff --git a/src/filesystem/windows/SDL_sysfsops.c b/src/filesystem/windows/SDL_sysfsops.c
+index f0fc0fd..2f09bc6 100644
+--- a/src/filesystem/windows/SDL_sysfsops.c
++++ b/src/filesystem/windows/SDL_sysfsops.c
+@@ -33,6 +33,20 @@
+ #define COPY_FILE_NO_BUFFERING 0x00001000
+ #endif
+ 
++#ifdef SDL_PLATFORM_WINRT
++/* GT3 Revisited: the plain Win32 calls only reach the app's own folders in a UWP app. The
++   "FromApp" variants (Windows 10 1803+) also reach whatever the app was granted: a file or
++   folder the user picked, or the whole file system with broadFileSystemAccess (a USB drive on
++   an Xbox). Same signatures. Rename and copy keep the plain calls: MoveFileFromAppW cannot
++   replace a file, and those are only used inside the user data folder. */
++#include <fileapifromapp.h>
++#define FindFirstFileExW FindFirstFileExFromAppW
++#define GetFileAttributesExW GetFileAttributesExFromAppW
++#define CreateDirectoryW(p, sa) CreateDirectoryFromAppW(p, sa)
++#define DeleteFileW DeleteFileFromAppW
++#define RemoveDirectoryW RemoveDirectoryFromAppW
++#endif
++
+ bool SDL_SYS_EnumerateDirectory(const char *path, SDL_EnumerateDirectoryCallback cb, void *userdata)
+ {
+     SDL_EnumerationResult result = SDL_ENUM_CONTINUE;
+diff --git a/src/io/SDL_iostream.c b/src/io/SDL_iostream.c
+index ef2335b..09ffd6f 100644
+--- a/src/io/SDL_iostream.c
++++ b/src/io/SDL_iostream.c
+@@ -22,6 +22,12 @@
+ 
+ #if defined(SDL_PLATFORM_WINDOWS)
+ #include "../core/windows/SDL_windows.h"
++#ifdef SDL_PLATFORM_WINRT
++/* GT3 Revisited: CreateFile2FromAppW also opens files outside the app's folders that the app
++   was granted (a picked file, or anything with broadFileSystemAccess), e.g. a disc image on a
++   USB drive on an Xbox; CreateFile2 does not. Same signature. Windows 10 1803+. */
++#include <fileapifromapp.h>
++#endif
+ #else
+ #include <unistd.h>
+ #endif
+@@ -128,7 +134,7 @@ static HANDLE SDLCALL windows_file_open(const char *filename, const char *mode)
+         SDL_zero(extparams);
+         extparams.dwSize = sizeof(extparams);
+         extparams.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
+-        h = CreateFile2(str,
++        h = CreateFile2FromAppW(str,
+                         (w_right | r_right),
+                         (w_right) ? 0 : FILE_SHARE_READ,
+                         (must_exist | truncate | a_mode),

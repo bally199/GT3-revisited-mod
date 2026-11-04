@@ -725,7 +725,11 @@ private:
             if (gpu_cfg == value) chosen_missing = opens == false;
             if (opens.value_or(false) || gpu_cfg == value) gpu_values.push_back(value), gpu_labels.push_back(label);
         };
-#ifdef SDL_PLATFORM_WINDOWS
+#if GT3R_UWP
+        (void)offer; // Xbox: ANGLE is the only 3D renderer (App::init), so no others are offered
+        const char* gpu_desc = "Automatic: OpenGL ES through ANGLE (Direct3D 11), the Xbox's only 3D renderer. "
+                               "Off: 2D-only fallback.";
+#elif defined(SDL_PLATFORM_WINDOWS)
         offer("gles", "OpenGL ES (ANGLE)", GlesKind::Angle);
         offer("gles_driver", "OpenGL ES (driver)", GlesKind::Driver);
         const char* gpu_desc = "Automatic: SDL_GPU (Vulkan), or OpenGL ES on GPUs without Vulkan. OpenGL ES: tried "
@@ -1159,7 +1163,7 @@ private:
                            a->input().set_background(v);
                            a->save_config();
                        });
-#ifdef SDL_PLATFORM_WINDOWS
+#if defined(SDL_PLATFORM_WINDOWS) && !GT3R_UWP // Xbox: pads only through Windows.Gaming.Input
             // [input] xbox_driver: SDL takes it at start (App::init).
             {
                 Row& xbox = choice("Xbox controllers",

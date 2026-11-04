@@ -846,8 +846,15 @@ SDL_Renderer* gt3r_gl_CreateGPURenderer(SDL_GPUDevice* device, SDL_Window* windo
     // ANGLE over the driver's own OpenGL ES when it is there, unless [video] gpu = gles_driver
     // (SDL_OPENGL_ES_DRIVER in the environment overrides both, for comparisons). SDL still turns
     // to EGL, so to ANGLE when it is there, for a driver without OpenGL ES 3.0 contexts.
+#if GT3R_UWP
+    // UWP (Xbox): SDL's WinRT video driver always goes through ANGLE, packaged with the app, on
+    // the app's CoreWindow; the present-path attribute below is for window-handle swap chains.
+    (void)angle_surface_attribs;
+    (void)angle_present;
+#else
     SDL_SetHint(SDL_HINT_OPENGL_ES_DRIVER, device->angle && angle_present() ? "1" : "0");
     SDL_EGL_SetAttributeCallbacks(nullptr, angle_surface_attribs, nullptr, nullptr);
+#endif
 #endif
     SDL_Renderer* r = create_es3_renderer(window, device->debug);
     if (!r) return nullptr;

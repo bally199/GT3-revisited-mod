@@ -51,7 +51,7 @@ elseif(TARGET gt3r AND WIN32)
   target_sources(gt3r PRIVATE ${GT3R_PACKAGING_DIR}/gt3r.rc)
 endif()
 
-if(ANDROID OR IOS) # (packaged by Gradle, or installed from Xcode by each builder)
+if(ANDROID OR IOS OR GT3R_UWP) # (packaged by Gradle, installed from Xcode by each builder, or the UWP package: cmake/Uwp.cmake)
   return()
 endif()
 

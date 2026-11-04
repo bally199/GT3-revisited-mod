@@ -334,6 +334,9 @@ private:
 #if GT3R_XR
         vr_ = app.xr() != nullptr;
 #endif
+#if GT3R_UWP
+        vr_ = true; // Xbox: the game's own keyboard, typed with the pad (App::init)
+#endif
         if (app.vfs()) {
             db_.load(*app.vfs());
             colors_.load(*app.vfs());

@@ -64,6 +64,11 @@ bool App::init(int argc, char** argv) {
     // own (app/text_keyboard.h), so SDL doesn't ask for it.
     SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "0");
 #endif
+#if GT3R_UWP
+    // Xbox: text (online session codes) is typed on the game's own pad keyboard, as in VR,
+    // rather than the system's, which covers the screen.
+    SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "0");
+#endif
     // iOS: the audio session games have (the system's default for apps): silent with the Ring /
     // Silent switch, and other apps' music paused while the game plays. SDL's own default there
     // (Playback, mixed with others) played on with the switch on silent.
@@ -109,10 +114,10 @@ bool App::init(int argc, char** argv) {
     // [video] fullscreen = on at start), leaving no way out but F11.
     SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_MENU_VISIBILITY, "1");
     SDL_WindowFlags win_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
-    win_flags |= SDL_WINDOW_FULLSCREEN; // immersive: hide system bars
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS) || GT3R_UWP
+    win_flags |= SDL_WINDOW_FULLSCREEN; // immersive: hide system bars (Xbox: the whole TV)
 #endif
-#if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
+#if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS) && !GT3R_UWP
     // [video] fullscreen = on | off (desktop; F11 and the Settings screen change it)
     if (to_lower(config_.get("video", "fullscreen").value_or("off")) == "on") win_flags |= SDL_WINDOW_FULLSCREEN;
 #endif
@@ -143,6 +148,12 @@ bool App::init(int argc, char** argv) {
     bool use_gpu = gpu_cfg != "0" && gpu_cfg != "off";
     gpu_opts.gles = gpu_cfg == "gles" || gpu_cfg == "gles_driver";
     gpu_opts.angle = gpu_cfg != "gles_driver";
+#if GT3R_UWP
+    // Xbox: OpenGL ES through ANGLE is the only 3D renderer (SDL_GPU has no backend in a UWP
+    // app), so it is tried first rather than after SDL_GPU fails.
+    gpu_opts.gles = true;
+    gpu_opts.angle = true;
+#endif
     gpu_opts.msaa = platform::default_msaa(platform::is_mobile());
     if (auto v = config_.get("video", "msaa")) gpu_opts.msaa = std::atoi(v->c_str());
     if (auto v = config_.get("video", "anisotropy")) gpu_opts.anisotropy = std::atoi(v->c_str());
@@ -881,6 +892,12 @@ SDL_AppResult App::event(const SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT) return SDL_APP_SUCCESS;
     // Android may end a backgrounded app without a quit.
     if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND || e.type == SDL_EVENT_TERMINATING) remember_race_scale();
+#if GT3R_UWP
+    // Xbox: each press of a pad's B also arrives as the system's Back key (SDL's WinRT driver
+    // turns the back request into AC_BACK), which would act twice and cancel binding B.
+    if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && e.key.scancode == SDL_SCANCODE_AC_BACK)
+        return SDL_APP_CONTINUE;
+#endif
     input_->handle_event(e);
     // The real mouse (not SDL's mouse made from a touch) brings the cursor back.
     const bool mouse_used = (e.type == SDL_EVENT_MOUSE_MOTION && e.motion.which != SDL_TOUCH_MOUSEID) ||

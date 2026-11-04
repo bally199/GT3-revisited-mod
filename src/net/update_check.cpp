@@ -119,6 +119,9 @@ std::string this_release_asset() {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     p = RvPlatform::Other; // no iOS package
 #endif
+#if GT3R_UWP
+    p = RvPlatform::Other; // no Xbox package: it is sideloaded (docs/dev/XBOX.md)
+#endif
 #if GT3R_XR
     return release_asset(p, this_arch(), true);
 #else

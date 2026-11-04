@@ -298,6 +298,8 @@ std::vector<std::string> local_addresses() {
         if (s.rfind("127.", 0) != 0 && s.rfind("169.254.", 0) != 0) out.push_back(s);
     }
     freeifaddrs(list);
+#elif GT3R_UWP
+    // Xbox: gethostname is not for store apps; the lobby then shows no LAN address of its own.
 #else
     ensure_init();
     char name[256] = {};

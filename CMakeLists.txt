@@ -14,6 +14,18 @@ option(GT3R_BUILD_TOOLS "Build the gt3tool command line utility" ON)
 option(GT3R_BUILD_TESTS "Build unit tests" ON)
 option(GT3R_PROGRAM_TOOLS "Developer-only gt3tool commands" OFF)
 
+# Xbox (UWP Dev Mode) and other Windows Store targets: -DCMAKE_SYSTEM_NAME=WindowsStore
+# (docs/dev/XBOX.md). Only the game is built: the tools and tests are desktop programs.
+if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+  set(GT3R_UWP ON)
+  # gt3r.exe and SDL3.dll side by side in bin/<config>; cmake/Uwp.cmake packages SDL3.dll from there.
+  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+  set(GT3R_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+  set(GT3R_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+else()
+  set(GT3R_UWP OFF)
+endif()
+
 if(IOS)
   # The warnings are the flags below, as on every platform, not Xcode's iOS defaults on top
   # (-Wshorten-64-to-32).
@@ -60,6 +72,11 @@ endif()
 # Online play (src/net): Winsock on Windows.
 if(WIN32)
   target_link_libraries(gt3r_engine PUBLIC ws2_32)
+endif()
+if(GT3R_UWP)
+  target_compile_definitions(gt3r_engine PUBLIC GT3R_UWP=1)
+  # getenv and friends that store apps lack (src/platform/uwp_compat.h).
+  target_compile_options(gt3r_engine PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:/FI${CMAKE_SOURCE_DIR}/src/platform/uwp_compat.h>")
 endif()
 # The OpenGL ES 3.0 renderer (src/render/gpu_gles.*, docs/dev/RENDERING.md "OpenGL ES"): the
 # fallback for PCs whose GPU SDL_GPU has no backend for (no Vulkan). It compiles to nothing
@@ -148,7 +165,10 @@ target_link_libraries(${GT3R_APP_TARGET} PRIVATE gt3r_engine)
 # packaging/angle.ps1 as CI's Windows package does. Without it the renderer uses the driver's
 # OpenGL ES.
 set(GT3R_ANGLE_DIR "" CACHE PATH "Windows: folder with ANGLE's libEGL.dll, libGLESv2.dll and LICENSE-ANGLE.txt")
-if(WIN32 AND GT3R_ANGLE_DIR)
+if(GT3R_UWP)
+  # Packaged into the app instead of copied next to the executable (cmake/Uwp.cmake).
+  include(cmake/Uwp.cmake)
+elseif(WIN32 AND GT3R_ANGLE_DIR)
   set(GT3R_ANGLE_FILES ${GT3R_ANGLE_DIR}/libEGL.dll ${GT3R_ANGLE_DIR}/libGLESv2.dll)
   foreach(f ${GT3R_ANGLE_FILES} ${GT3R_ANGLE_DIR}/LICENSE-ANGLE.txt)
     if(NOT EXISTS ${f})

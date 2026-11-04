@@ -8,7 +8,7 @@
 #include <cstring>
 #include <vector>
 
-#ifdef _WIN32
+#if defined(_WIN32) && !GT3R_UWP
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
@@ -128,7 +128,7 @@ bool wants_launch_help(int argc, char** argv) {
 }
 
 void print_launch_help() {
-#ifdef _WIN32
+#if defined(_WIN32) && !GT3R_UWP
     // A GUI program has no console of its own: write to the one it was started from, if any.
     if (AttachConsole(ATTACH_PARENT_PROCESS)) {
         FILE* f = nullptr;

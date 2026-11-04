@@ -1,0 +1,49 @@
+name: xbox-uwp
+
+# The UWP package for Xbox Dev Mode (docs/dev/XBOX.md), on manual runs and on pushes that touch
+# the UWP files. It is signed with a throwaway self-signed certificate made here; the artifact
+# holds the .msix, its .cer and the VCLibs framework package that Device Portal also needs.
+# ANGLE for UWP (packaging/uwp/angle-uwp.ps1, 20-30 min) is kept in the cache.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'cmake/Uwp.cmake'
+      - 'cmake/patches/sdl-uwp.patch'
+      - 'packaging/uwp/**'
+      - '.github/workflows/xbox-uwp.yml'
+
+jobs:
+  uwp:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: ANGLE for UWP (cache)
+        id: angle
+        uses: actions/cache@v4
+        with:
+          path: angle-uwp
+          key: angle-uwp-${{ hashFiles('packaging/uwp/angle-uwp.ps1') }}
+      - name: Build ANGLE for UWP
+        if: steps.angle.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./packaging/uwp/angle-uwp.ps1
+      - name: Signing certificate (self-signed, this run only)
+        shell: pwsh
+        run: ./packaging/uwp/make-cert.ps1 -Out "$env:RUNNER_TEMP\gt3r-dev.pfx" -Password gt3r
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S . -B build-uwp -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0
+          -DGT3R_ANGLE_DIR="$PWD/angle-uwp"
+          -DGT3R_UWP_CERT="$env:RUNNER_TEMP\gt3r-dev.pfx" -DGT3R_UWP_CERT_PASSWORD=gt3r
+          -DGT3R_UWP_BUILD=${{ github.run_number }}
+      - name: Build and package
+        run: cmake --build build-uwp --config Release --target gt3r -- /m
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gt3r-xbox-uwp
+          path: build-uwp/AppPackages/
+          if-no-files-found: error

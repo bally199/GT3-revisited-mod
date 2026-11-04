@@ -30,3 +30,9 @@ dist/
 # Signing keys
 *.jks
 *.keystore
+
+# UWP (docs/dev/XBOX.md): the signing certificate and the ANGLE build
+*.pfx
+*.cer
+/angle-uwp/
+/build-uwp/

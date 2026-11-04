@@ -8,7 +8,7 @@
 #include <cstring>
 #include <string>
 
-#if defined(SDL_PLATFORM_WINDOWS)
+#if defined(SDL_PLATFORM_WINDOWS) && !GT3R_UWP
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #elif defined(SDL_PLATFORM_LINUX)
@@ -35,7 +35,9 @@ const char* probe_arg(GlesKind kind) { return kind == GlesKind::Angle ? "angle" 
 
 // This executable, to start the copy; empty where there is none to start.
 std::string own_path() {
-#if defined(SDL_PLATFORM_WINDOWS)
+#if GT3R_UWP
+    return {}; // no processes of its own to start: the renderer is offered without a probe
+#elif defined(SDL_PLATFORM_WINDOWS)
     std::wstring w(MAX_PATH, L'\0');
     for (;;) {
         const DWORD n = GetModuleFileNameW(nullptr, w.data(), DWORD(w.size()));

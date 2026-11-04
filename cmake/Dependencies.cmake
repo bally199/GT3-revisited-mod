@@ -42,6 +42,19 @@ endif()
 if(IOS)
   set(GT3R_FETCH_SDL ON)
 endif()
+# Xbox / UWP (docs/dev/XBOX.md): SDL 3 dropped its WinRT backend, so these builds take a
+# community-maintained SDL 3.4 that keeps it (CoreWindow, OpenGL ES through ANGLE,
+# Windows.Gaming.Input pads), as a DLL packaged with the app, plus our patch that lets it open
+# files the app was granted outside its own folders (a disc image on a USB drive).
+set(GT3R_SDL_REPOSITORY https://github.com/libsdl-org/SDL.git)
+set(GT3R_SDL_PATCH_FILES ${CMAKE_CURRENT_LIST_DIR}/patches/sdl-vulkan-amd-fullscreen.patch)
+if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+  set(GT3R_SDL_REPOSITORY https://github.com/XboxEmulationHub/SDL3-uwp.git)
+  set(GT3R_SDL_TAG release-uwp-3.4.14)
+  set(GT3R_SDL_PATCH_FILES ${CMAKE_CURRENT_LIST_DIR}/patches/sdl-uwp.patch)
+  set(GT3R_FETCH_SDL ON)
+  set(GT3R_SDL_SHARED ON)
+endif()
 if(NOT GT3R_FETCH_SDL)
   find_package(SDL3 CONFIG QUIET)
 endif()
@@ -60,11 +73,11 @@ if(NOT SDL3_FOUND)
   if(NOT GT3R_XR)
     find_package(Git REQUIRED)
     set(GT3R_SDL_PATCH PATCH_COMMAND "${CMAKE_COMMAND}" "-DGIT=${GIT_EXECUTABLE}"
-        "-DPATCHES=${CMAKE_CURRENT_LIST_DIR}/patches/sdl-vulkan-amd-fullscreen.patch"
+        "-DPATCHES=${GT3R_SDL_PATCH_FILES}"
         -P "${CMAKE_CURRENT_LIST_DIR}/ApplyPatches.cmake")
   endif()
   FetchContent_Declare(SDL3
-    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+    GIT_REPOSITORY ${GT3R_SDL_REPOSITORY}
     GIT_TAG ${GT3R_SDL_TAG}
     GIT_SHALLOW ${GT3R_SDL_SHALLOW}
     ${GT3R_SDL_PATCH})
@@ -84,7 +97,9 @@ if(GT3R_XR)
 endif()
 
 # --- zlib: GT3 stores compressed files as gzip / raw deflate ---------------
-find_package(ZLIB QUIET)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore") # UWP: always our own (a desktop zlib won't do)
+  find_package(ZLIB QUIET)
+endif()
 if(NOT ZLIB_FOUND)
   message(STATUS "zlib not found on system; fetching")
   set(SKIP_INSTALL_ALL ON) # a static zlib is linked in; don't install its files into packages
