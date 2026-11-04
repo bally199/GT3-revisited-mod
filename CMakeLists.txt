@@ -75,8 +75,6 @@ if(WIN32)
 endif()
 if(GT3R_UWP)
   target_compile_definitions(gt3r_engine PUBLIC GT3R_UWP=1)
-  # getenv and friends that store apps lack (src/platform/uwp_compat.h).
-  target_compile_options(gt3r_engine PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:/FI${CMAKE_SOURCE_DIR}/src/platform/uwp_compat.h>")
 endif()
 # The OpenGL ES 3.0 renderer (src/render/gpu_gles.*, docs/dev/RENDERING.md "OpenGL ES"): the
 # fallback for PCs whose GPU SDL_GPU has no backend for (no Vulkan). It compiles to nothing

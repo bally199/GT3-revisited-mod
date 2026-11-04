@@ -114,7 +114,12 @@ bool resolve(const std::string& text, u16 default_port, Address& out, std::strin
     addrinfo* res = nullptr;
     int rc = getaddrinfo(host.c_str(), port.c_str(), &hints, &res);
     if (rc != 0 || !res) {
+#if GT3R_UWP
+        // UWP builds are UNICODE, where gai_strerror returns a wide string.
+        if (error) *error = "cannot resolve " + text + " (error " + std::to_string(rc) + ")";
+#else
         if (error) *error = "cannot resolve " + text + ": " + gai_strerror(rc);
+#endif
         return false;
     }
     // Prefer IPv4 (home routers forward it; v6 firewalls usually drop unsolicited packets).

@@ -16,8 +16,7 @@ below is the plan for the first build; expect a round or two of fixes.
 
 Game changes under `GT3R_UWP`: always fullscreen; OpenGL ES (ANGLE) first; online codes typed
 on the game's own pad keyboard (as in VR); no update download (there is no Xbox package to
-fetch); no console, process or `gethostname` code; `getenv` comes from SDL
-(`src/platform/uwp_compat.h`, force-included); the system Back key that comes with each B press
+fetch); no console, process or `gethostname` code; the system Back key that comes with each B press
 is dropped; the log also goes to `gt3r.log` in the user data folder.
 
 ## Build
