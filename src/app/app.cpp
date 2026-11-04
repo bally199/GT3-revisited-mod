@@ -19,6 +19,8 @@
 #include "platform/mac_layer.h"
 
 #include <algorithm>
+#include <atomic>
+#include <thread>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -140,6 +142,10 @@ bool App::init(int argc, char** argv) {
     }
     touch_ui_ = platform::is_mobile() || phone_sim_;
 #if GT3R_UWP && GT3R_GLES
+    // SDL picks the GL library names by platform and has none for UWP: it would ask for Linux's
+    // libGLESv2.so.2. ANGLE's DLLs, packaged beside the game:
+    SDL_SetHint(SDL_HINT_OPENGL_LIBRARY, "libGLESv2.dll");
+    SDL_SetHint(SDL_HINT_EGL_LIBRARY, "libEGL.dll");
     // gt3r.log: whether Windows loads ANGLE's DLLs from the package, and if not, why (a
     // missing DLL or a missing function in one).
     for (const char* dll : {"z.dll", "libGLESv2.dll", "libEGL.dll"}) {
@@ -262,7 +268,35 @@ bool App::init(int argc, char** argv) {
     music_.set_song_list_file(data_dir_ + "music_songs.txt");
     follow_music_folder(false);
     UWP_STEP("audio");
+#if GT3R_UWP
+    // Xbox: opening the audio device waits for Windows' asynchronous activation, which can
+    // need this (the UI) thread to keep processing its events; waiting here instead would wait
+    // forever. So the device opens on another thread while this one keeps pumping events.
+    {
+        std::atomic<bool> audio_done{false};
+        std::unique_ptr<AudioEngine> engine;
+        const std::string audio_device = config_.get("audio", "device").value_or("");
+        std::thread audio_thread([&] {
+            engine = std::make_unique<AudioEngine>(audio_device);
+            audio_done = true;
+        });
+        const Uint64 audio_start = SDL_GetTicks();
+        bool audio_warned = false;
+        while (!audio_done) {
+            SDL_PumpEvents();
+            SDL_Delay(2);
+            if (!audio_warned && SDL_GetTicks() - audio_start > 5000) {
+                LOG_WARN("Audio: the device is still opening after 5 s");
+                audio_warned = true;
+            }
+        }
+        audio_thread.join();
+        audio_ = std::move(engine);
+        UWP_STEP("audio ready");
+    }
+#else
     audio_ = std::make_unique<AudioEngine>(config_.get("audio", "device").value_or(""));
+#endif
     if (auto vol = config_.get("audio", "music_volume")) audio_->set_music_volume(std::strtof(vol->c_str(), nullptr));
     if (auto vol = config_.get("audio", "sfx_volume")) audio_->set_sfx_volume(std::strtof(vol->c_str(), nullptr));
     if (auto v = config_.get("audio", "surround_cue")) audio_->voices().set_surround_cue(*v == "on");
