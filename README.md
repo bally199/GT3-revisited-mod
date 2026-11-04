@@ -1,7 +1,7 @@
 # GT3 Revisited
 
 An open-source reimplementation of the *Gran Turismo 3 A-Spec* engine for
-modern platforms: **Windows, macOS, Linux, Android, iOS and Meta Quest (VR)**.
+UWP Xbox One/Series consoles. 
 
 GT3 Revisited contains **no game data or assets**. It needs a
 disc image (`.iso` or `.chd`) that you made from your own copy of the game. At runtime
