@@ -32,14 +32,15 @@ jobs:
       - name: Signing certificate (self-signed, this run only)
         shell: pwsh
         run: ./packaging/uwp/make-cert.ps1 -Out "$env:RUNNER_TEMP\gt3r-dev.pfx" -Password gt3r
+      # Each -D argument in quotes: PowerShell splits an unquoted -DNAME=10.0 at the dot.
       - name: Configure
         shell: pwsh
         run: >
           cmake -S . -B build-uwp -G "Visual Studio 17 2022" -A x64
-          -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0
-          -DGT3R_ANGLE_DIR="$PWD/angle-uwp"
-          -DGT3R_UWP_CERT="$env:RUNNER_TEMP\gt3r-dev.pfx" -DGT3R_UWP_CERT_PASSWORD=gt3r
-          -DGT3R_UWP_BUILD=${{ github.run_number }}
+          "-DCMAKE_SYSTEM_NAME=WindowsStore" "-DCMAKE_SYSTEM_VERSION=10.0"
+          "-DGT3R_ANGLE_DIR=$PWD/angle-uwp"
+          "-DGT3R_UWP_CERT=$env:RUNNER_TEMP\gt3r-dev.pfx" "-DGT3R_UWP_CERT_PASSWORD=gt3r"
+          "-DGT3R_UWP_BUILD=${{ github.run_number }}"
       - name: Build and package
         run: cmake --build build-uwp --config Release --target gt3r -- /m
       - uses: actions/upload-artifact@v4

@@ -39,9 +39,10 @@ In PowerShell, from the repository:
 ```
 ./packaging/uwp/angle-uwp.ps1                        # -> .\angle-uwp (20-30 min, once)
 ./packaging/uwp/make-cert.ps1 -Out gt3r-dev.pfx      # once; never commit the .pfx
-cmake -S . -B build-uwp -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME=WindowsStore `
-      -DCMAKE_SYSTEM_VERSION=10.0 -DGT3R_ANGLE_DIR="$PWD/angle-uwp" `
-      -DGT3R_UWP_CERT="$PWD/gt3r-dev.pfx" -DGT3R_UWP_CERT_PASSWORD=gt3r
+# Quotes around each -D: PowerShell splits an unquoted -DCMAKE_SYSTEM_VERSION=10.0 at the dot.
+cmake -S . -B build-uwp -G "Visual Studio 17 2022" -A x64 "-DCMAKE_SYSTEM_NAME=WindowsStore" `
+      "-DCMAKE_SYSTEM_VERSION=10.0" "-DGT3R_ANGLE_DIR=$PWD/angle-uwp" `
+      "-DGT3R_UWP_CERT=$PWD/gt3r-dev.pfx" "-DGT3R_UWP_CERT_PASSWORD=gt3r"
 cmake --build build-uwp --config Release --target gt3r
 ```
 
