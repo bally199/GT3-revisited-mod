@@ -487,6 +487,10 @@ private:
     SDL_GPUTexture* half_ = nullptr;
     SDL_Texture* half_wrapper_ = nullptr;
     int half_w_ = 0, half_h_ = 0;
+    // Xbox (OpenGL ES on ANGLE, Direct3D 11.0): the picture redrawn 1:1 by a shader for the 2D
+    // renderer (present_, as present_wrapper_); see View3D::draw.
+    SDL_GPUTexture* present_ = nullptr;
+    SDL_Texture* present_wrapper_ = nullptr;
     // Supersampled targets that failed (GPU memory) lower this view's most: 75% of the failed
     // size each time, down to native.
     float scale_cap_ = platform::kMaxRenderScale;
