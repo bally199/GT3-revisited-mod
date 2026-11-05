@@ -126,6 +126,7 @@ bool GpuContext::open_gles(SDL_Window* window, const GpuOptions& options) {
         return false;
     }
     gles_ = true;
+    if (!options.base_vertex) gles::disable_base_vertex();
     return true;
 #else
     (void)window;
@@ -153,8 +154,10 @@ bool GpuContext::init(SDL_Window* window, const GpuOptions& options) {
     vs_clipped_ = make_shader(Stage::ClippedVertex);
     fs_ = make_shader(Stage::Fragment);
     if (!vs_ || !vs_clipped_ || !fs_) return false;
-    vs_copy_ = make_shader(Stage::CopyVertex);
-    fs_copy_ = make_shader(Stage::CopyFragment);
+    if (options.spin_copies) {
+        vs_copy_ = make_shader(Stage::CopyVertex);
+        fs_copy_ = make_shader(Stage::CopyFragment);
+    }
 
     for (SDL_GPUTextureFormat f :
          {SDL_GPU_TEXTUREFORMAT_D32_FLOAT, SDL_GPU_TEXTUREFORMAT_D24_UNORM, SDL_GPU_TEXTUREFORMAT_D16_UNORM})

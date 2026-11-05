@@ -765,6 +765,12 @@ bool active() { return g_device != nullptr; }
 
 bool angle() { return g_device && g_device->angle; }
 
+void disable_base_vertex() {
+    if (!g_device || !g_device->draw_base_vertex) return;
+    g_device->draw_base_vertex = nullptr;
+    LOG_INFO("OpenGL ES: base vertex draws off ([video] gles_base_vertex)");
+}
+
 const char* description() { return g_device ? g_device->description.c_str() : ""; }
 
 } // namespace gt3r::render::gles

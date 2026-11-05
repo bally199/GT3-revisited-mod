@@ -82,6 +82,11 @@ struct GpuOptions {
     int anisotropy = 4;        // anisotropic texture filtering: 1 (off), 2, 4, 8 or 16
     bool gles = false;         // OpenGL ES first, SDL_GPU after ([video] gpu = gles; GT3R_GLES builds)
     bool angle = true;         // Windows: OpenGL ES through ANGLE when bundled (off: gpu = gles_driver)
+    // OpenGL ES: glDrawElementsInstancedBaseVertex where offered ([video] gles_base_vertex; off:
+    // the attribute offsets move instead), and the spinning rims' instanced copies
+    // ([video] spin_copies; off: one rim). Switches for drivers that get them wrong (the Xbox).
+    bool base_vertex = true;
+    bool spin_copies = true;
     // VR builds (GT3R_XR): create the device through the headset's OpenXR runtime when there is
     // one; the 2D renderer then draws offscreen (canvases of xr::Session) instead of the window.
     bool xr = false;

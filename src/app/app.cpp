@@ -209,6 +209,12 @@ bool App::init(int argc, char** argv) {
     gpu_opts.debug = true;
 #endif
     if (auto v = config_.get("video", "gpu_debug")) gpu_opts.debug = *v == "1";
+#if GT3R_UWP
+    // Xbox, for now: the rims' instanced copies came out far from the car with base vertex draws.
+    gpu_opts.base_vertex = false;
+#endif
+    if (auto v = config_.get("video", "gles_base_vertex")) gpu_opts.base_vertex = to_lower(*v) != "off";
+    if (auto v = config_.get("video", "spin_copies")) gpu_opts.spin_copies = to_lower(*v) != "off";
     show_fps_ = to_lower(config_.get("video", "show_fps").value_or("off")) == "on";
     gamma_ = render::parse_gamma(config_.get("video", "gamma").value_or(""));
     // [video] render_scale = auto | 0.5..4.0 (auto: native on desktop, capped on mobile)
