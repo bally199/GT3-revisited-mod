@@ -352,7 +352,12 @@ void begin_gl(SDL_GPUDevice* dev) {
 // [video] gpu_debug: the GL errors this file's calls left, logged where they showed up.
 void check_gl(const SDL_GPUDevice* dev, const char* where) {
     if (!dev || !dev->debug) return;
-    for (GLenum e = glGetError(); e != GL_NO_ERROR; e = glGetError()) LOG_WARN("OpenGL ES error 0x%x in %s", e, where);
+    // Each error and place a few times, not every frame (60 lines a second would bury the rest).
+    static std::map<std::pair<GLenum, std::string>, int> seen;
+    for (GLenum e = glGetError(); e != GL_NO_ERROR; e = glGetError()) {
+        int& n = seen[{e, where}];
+        if (++n <= 3) LOG_WARN("OpenGL ES error 0x%x in %s%s", e, where, n == 3 ? " (not logged again)" : "");
+    }
 }
 
 Uint64 object_key(const SDL_GPUTexture* t) {

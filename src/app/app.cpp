@@ -203,6 +203,11 @@ bool App::init(int argc, char** argv) {
     if (auto v = config_.get("video", "msaa")) gpu_opts.msaa = std::atoi(v->c_str());
     if (auto v = config_.get("video", "anisotropy")) gpu_opts.anisotropy = std::atoi(v->c_str());
     if (auto v = config_.get("video", "vsync")) gpu_opts.vsync = *v != "0";
+#if GT3R_UWP
+    // Xbox, for now: GL errors logged, and a context that validates calls (a no-error context
+    // turns an unsupported call into garbage on screen). [video] gpu_debug = 0 turns it off.
+    gpu_opts.debug = true;
+#endif
     if (auto v = config_.get("video", "gpu_debug")) gpu_opts.debug = *v == "1";
     show_fps_ = to_lower(config_.get("video", "show_fps").value_or("off")) == "on";
     gamma_ = render::parse_gamma(config_.get("video", "gamma").value_or(""));

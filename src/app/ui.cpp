@@ -1,6 +1,9 @@
 #include "app/ui.h"
 
 #include <algorithm>
+#include <cctype>
+#include <string>
+#include <utility>
 #include <cmath>
 #include <numbers>
 
@@ -257,9 +260,41 @@ void Ui::header(std::string_view title, std::string_view hint) {
     if (room > 16) text_right(safe_.right() - 8, 6, elide(hint, room), colors::kDim);
 }
 
+#if GT3R_UWP
+namespace {
+// Xbox: the hints name GT3's PlayStation buttons; the pad says A, B, X, Y. Whole words only, so
+// "start" in a sentence stays.
+std::string xbox_button_names(std::string_view s) {
+    static const std::pair<std::string_view, std::string_view> kNames[] = {
+        {"Triangle", "Y"}, {"Circle", "B"}, {"Square", "X"}, {"Cross", "A"}, {"L1", "LB"}, {"R1", "RB"},
+        {"L2", "LT"}, {"R2", "RT"}, {"L3", "LS"}, {"R3", "RS"}, {"Start", "Menu"}, {"Select", "View"}};
+    auto word = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0; };
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size();) {
+        bool named = false;
+        if (i == 0 || !word(s[i - 1]))
+            for (const auto& [from, to] : kNames)
+                if (s.substr(i, from.size()) == from && (i + from.size() == s.size() || !word(s[i + from.size()]))) {
+                    out += to;
+                    i += from.size();
+                    named = true;
+                    break;
+                }
+        if (!named) out += s[i++];
+    }
+    return out;
+}
+} // namespace
+#endif
+
 void Ui::footer(std::string_view hint) {
     fill(0, h_ - 16, w_, 16, colors::kPanel);
+#if GT3R_UWP
+    text(safe_.x + 8, h_ - 12, xbox_button_names(hint), colors::kDim);
+#else
     text(safe_.x + 8, h_ - 12, hint, colors::kDim);
+#endif
 }
 
 float Ui::tab(float x, float y, float h, std::string_view label, bool active, bool focused) {
