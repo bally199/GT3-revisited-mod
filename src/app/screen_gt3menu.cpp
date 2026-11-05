@@ -39,6 +39,7 @@
 #include "video/ipu.h"
 #include "video/movie_player.h"
 
+#include <cmath>
 #include <algorithm>
 #include <cstdlib>
 #include <deque>
@@ -249,10 +250,8 @@ public:
             return;
         }
         draw_frame(app);
-        // 4:3 picture in the middle of the game area.
-        const UiRect pic = ui.picture43();
-        const SDL_FRect dst{pic.x, pic.y, pic.w, pic.h};
-        if (frame_) SDL_RenderTexture(app.renderer(), frame_, nullptr, &dst);
+        // 4:3 picture in the middle of the game area (or as [video] menu_shape has it).
+        ui.menu_picture(frame_);
         // Our main menu (settings, mods, online, ...), in the bar beside the title menu.
         gt3r_button_ = {};
         if (on_title()) {
@@ -282,7 +281,7 @@ public:
         float y = ui.height() - 12;
         if (debug)
             for (auto it = messages_.rbegin(); it != messages_.rend() && y > ui.height() - 60; ++it, y -= 10)
-                ui.text(dst.x + 4, y, it->text, colors::kAccent);
+                ui.text(ui.picture43().x + 4, y, it->text, colors::kAccent);
     }
 
     bool update_prompts() const override { return on_title(); } // the update dialog, on the title page only
@@ -390,6 +389,26 @@ private:
                     draw_modulated(r, movie_.texture(), src, d, e, k == 0 ? alpha : alpha / float(k + 1));
                 }
                 return;
+            }
+            // Field-split movies: each field leaves one frame row of the box uncovered (the bottom
+            // one for the first field, the top one for the second), so those rows flickered at the
+            // field rate, as on the PS2 and in PCSX2. That row gets the field stretched over the
+            // whole box (clipped to the row), the rest stays exact.
+            if (dst.h < box.h - 0.01f) {
+                const bool top = dst.y > box.y + 0.01f;
+                const float y0 = top ? box.y : dst.y + dst.h, y1 = top ? dst.y : box.y + box.h;
+                SDL_Rect before{};
+                const bool clipped = SDL_RenderClipEnabled(r);
+                if (clipped) SDL_GetRenderClipRect(r, &before);
+                const int x0 = int(std::floor(box.x)), x1 = int(std::ceil(box.x + box.w));
+                const int r0 = int(std::floor(y0)), r1 = std::max(r0 + 1, int(std::ceil(y1)));
+                SDL_Rect row{x0, r0, x1 - x0, r1 - r0};
+                SDL_Rect cut = row;
+                if (!clipped || SDL_GetRectIntersection(&row, &before, &cut)) {
+                    SDL_SetRenderClipRect(r, &cut);
+                    draw_modulated(r, movie_.texture(), src, box, e, alpha);
+                    SDL_SetRenderClipRect(r, clipped ? &before : nullptr);
+                }
             }
             draw_modulated(r, movie_.texture(), src, dst, e, alpha);
         });

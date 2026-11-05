@@ -124,9 +124,7 @@ public:
             return;
         }
         draw_frame(app);
-        const UiRect pic = ui.picture43();
-        const SDL_FRect dst{pic.x, pic.y, pic.w, pic.h};
-        if (frame_) SDL_RenderTexture(app.renderer(), frame_, nullptr, &dst);
+        ui.menu_picture(frame_);
     }
 
     bool follows_aspect() const override { return true; } // the game's menus

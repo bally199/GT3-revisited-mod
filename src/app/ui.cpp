@@ -30,6 +30,46 @@ Ui::Ui(SDL_Renderer* r) : r_(r) {
     if (ui_font::available()) font_ = std::make_unique<UiFontRenderer>(r_);
 }
 
+Ui::~Ui() {
+    for (SDL_Texture* t : ambient_)
+        if (t) SDL_DestroyTexture(t);
+}
+
+void Ui::menu_picture(SDL_Texture* picture) {
+    if (!picture) return;
+    const UiRect pic = picture43();
+    if (menu_shape_ == kMenuAmbient && pic.x > 0.5f) {
+        // The sides: the picture shrunk in two linear steps (each output texel the mean of about
+        // 4 x 4), stretched over the whole game area and darkened, so its colours carry on past
+        // the 4:3 edges without its detail.
+        static constexpr int kSize[2][2] = {{160, 112}, {40, 28}};
+        for (int i = 0; i < 2; ++i)
+            if (!ambient_[i]) {
+                ambient_[i] = SDL_CreateTexture(r_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, kSize[i][0], kSize[i][1]);
+                if (ambient_[i]) SDL_SetTextureScaleMode(ambient_[i], SDL_SCALEMODE_LINEAR);
+            }
+        if (ambient_[0] && ambient_[1]) {
+            SDL_Texture* prev = SDL_GetRenderTarget(r_);
+            SDL_BlendMode mode = SDL_BLENDMODE_NONE;
+            SDL_GetTextureBlendMode(picture, &mode);
+            SDL_SetTextureBlendMode(picture, SDL_BLENDMODE_NONE);
+            SDL_SetTextureBlendMode(ambient_[0], SDL_BLENDMODE_NONE);
+            SDL_SetRenderTarget(r_, ambient_[0]);
+            SDL_RenderTexture(r_, picture, nullptr, nullptr);
+            SDL_SetRenderTarget(r_, ambient_[1]);
+            SDL_RenderTexture(r_, ambient_[0], nullptr, nullptr);
+            SDL_SetRenderTarget(r_, prev);
+            SDL_SetTextureBlendMode(picture, mode);
+            SDL_SetTextureBlendMode(ambient_[1], SDL_BLENDMODE_NONE);
+            SDL_SetTextureColorMod(ambient_[1], 72, 72, 72);
+            const SDL_FRect all{0, 0, w_, h_};
+            SDL_RenderTexture(r_, ambient_[1], nullptr, &all);
+        }
+    }
+    const SDL_FRect dst{pic.x, pic.y, pic.w, pic.h};
+    SDL_RenderTexture(r_, picture, nullptr, &dst);
+}
+
 void Ui::text(float x, float y, std::string_view s, Color c) {
     if (font_ && font_->draw(FontFace::Body, kBodyEm, x, y + baseline(FontFace::Body, kBodyEm, kChar), s, to_f(c))) return;
     SDL_SetRenderDrawColor(r_, c.r, c.g, c.b, c.a);

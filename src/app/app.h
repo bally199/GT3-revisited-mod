@@ -92,6 +92,10 @@ public:
     // runs at 60 Hz); steadier when the computer is busy. Off (default): every display refresh.
     bool limit_60fps() const;
     void set_limit_60fps(bool on);
+    // [video] menu_shape = 4:3 (default) | stretch | ambient: the game's menu pictures between
+    // bars, stretched across the game area, or between blurred sides (Ui::menu_picture).
+    int menu_shape() const;
+    void set_menu_shape(int shape);
     // [video] show_fps = on | off (default off): the frame rate in a corner of the screen, over
     // every screen (App::draw_fps).
     bool show_fps() const { return show_fps_; }

@@ -543,6 +543,12 @@ private:
                    "screen; menus and movies stay 4:3.",
                    {"16:9", "4:3", "Fill screen"}, int(app.aspect()),
                    [a](int i) { a->set_aspect(platform::Aspect(i)); });
+        if (!vr)
+            choice("Menu shape",
+                   "The game's menus are 4:3 pictures. 4:3: between black bars. Stretch: across the whole "
+                   "game area (wider than drawn). Blurred sides: 4:3, with its colours carried out to the "
+                   "sides.",
+                   {"4:3", "Stretch", "Blurred sides"}, app.menu_shape(), [a](int i) { a->set_menu_shape(i); });
 
         // [video] gamma (App::set_gamma), and a row back to 1 while it is not.
         if (!vr) {

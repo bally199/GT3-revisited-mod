@@ -555,6 +555,16 @@ void App::apply_frame_limit() {
              interval == 1 ? "refresh" : (std::to_string(interval) + " refreshes").c_str());
 }
 
+int App::menu_shape() const {
+    const std::string v = to_lower(config_.get("video", "menu_shape").value_or("4:3"));
+    return v == "stretch" ? Ui::kMenuStretch : v == "ambient" ? Ui::kMenuAmbient : Ui::kMenu43;
+}
+
+void App::set_menu_shape(int shape) {
+    config_.set("video", "menu_shape", shape == Ui::kMenuStretch ? "stretch" : shape == Ui::kMenuAmbient ? "ambient" : "4:3");
+    save_config();
+}
+
 bool App::limit_60fps() const { return to_lower(config_.get("video", "limit_60fps").value_or("off")) == "on"; }
 
 void App::set_limit_60fps(bool on) {
@@ -1101,6 +1111,7 @@ void App::layout_ui(bool adaptive, bool game) {
         if (cur_w != w || cur_h != h || cur_mode != SDL_LOGICAL_PRESENTATION_LETTERBOX)
             SDL_SetRenderLogicalPresentation(renderer_, w, h, SDL_LOGICAL_PRESENTATION_LETTERBOX);
         if (ui_) ui_->set_layout(float(w), float(h), {0, 0, float(w), float(h)}, touch_ui_);
+        if (ui_) ui_->set_menu_shape(game ? menu_shape() : Ui::kMenu43);
         touch_.controls().set_game_area(float(w), float(h)); // before the screen asks for its safe area
         return;
     }
@@ -1129,6 +1140,7 @@ void App::layout_ui(bool adaptive, bool game) {
     x0 = std::clamp(x0, 0.0f, float(lw) / 4), y0 = std::clamp(y0, 0.0f, float(lh) / 4);
     x1 = std::clamp(x1, float(lw) * 3 / 4, float(lw)), y1 = std::clamp(y1, float(lh) * 3 / 4, float(lh));
     ui_->set_layout(float(lw), float(lh), {x0, y0, x1 - x0, y1 - y0}, touch_ui_);
+    ui_->set_menu_shape(Ui::kMenu43);
 }
 
 void App::draw_phone_mask() {

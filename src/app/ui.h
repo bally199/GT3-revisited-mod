@@ -56,6 +56,7 @@ public:
     // Blending is enabled so colours with alpha < 255 draw translucent
     // (e.g. panels over a 3D view).
     explicit Ui(SDL_Renderer* r);
+    ~Ui();
     SDL_Renderer* renderer() const { return r_; }
 
     // Layout of the frame being drawn. Tool screens get the fixed 640x360
@@ -69,8 +70,20 @@ public:
     void set_layout(float w, float h, UiRect safe, bool touch) { w_ = w, h_ = h, safe_ = safe, touch_ = touch; }
     float width() const { return w_; }
     float height() const { return h_; }
-    // The game's 4:3 picture (its menus, movies) in the middle of the layout, full height.
-    UiRect picture43() const { return {(w_ - h_ * 4 / 3) / 2, 0, h_ * 4 / 3, h_}; }
+    // The game's 4:3 picture (its menus, movies) in the middle of the layout, full height; with
+    // the stretched menu shape the whole game area.
+    UiRect picture43() const {
+        if (menu_shape_ == kMenuStretch) return {0, 0, w_, h_};
+        return {(w_ - h_ * 4 / 3) / 2, 0, h_ * 4 / 3, h_};
+    }
+    // [video] menu_shape (App::menu_shape): the game's 640x448 menu pictures 4:3 between bars,
+    // stretched across the game area, or 4:3 over a blurred, darkened stretch of themselves.
+    static constexpr int kMenu43 = 0, kMenuStretch = 1, kMenuAmbient = 2;
+    void set_menu_shape(int shape) { menu_shape_ = shape; }
+    int menu_shape() const { return menu_shape_; }
+    // Draws a game menu picture at picture43() as the menu shape has it (the ambient shape's
+    // blurred sides first).
+    void menu_picture(SDL_Texture* picture);
     const UiRect& safe() const { return safe_; }
     // Finger-sized targets (phones and tablets).
     bool touch() const { return touch_; }
@@ -135,6 +148,8 @@ private:
     float w_ = kWidth, h_ = kHeight;
     UiRect safe_{0, 0, kWidth, kHeight};
     bool touch_ = false;
+    int menu_shape_ = kMenu43;
+    SDL_Texture* ambient_[2] = {}; // the ambient shape's blur steps (160x112, 40x28)
     bool pointer_on_ = false;
     float pointer_x_ = 0, pointer_y_ = 0;
 };

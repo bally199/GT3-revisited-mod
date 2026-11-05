@@ -237,6 +237,17 @@ private:
     }
 
     using ShowroomCamera = render::ShowroomCamera;
+
+    // Xbox: the car pages' one pass (see showroom()) supersampled instead: drawn at twice the
+    // page's size and halved by the 2D renderer's linear filter (the mean of 2 x 2 texels a
+    // pixel), unless the render scale already goes that far.
+    static void supersample(App& app, render::DrawOptions& o, int w, int h) {
+#if GT3R_UWP
+        if (app.gpu() && app.gpu()->render_scale() < 2.0f) o.fixed_width = 2 * w, o.fixed_height = 2 * h;
+#else
+        (void)app, (void)o, (void)w, (void)h;
+#endif
+    }
     const ShowroomCamera& showroom_camera(App& app, const std::string& kind) {
         auto it = cameras_.find(kind);
         if (it != cameras_.end()) return it->second;
@@ -381,6 +392,7 @@ private:
         if (entry.rfind("buycar:", 0) != 0 && !(cap2d_.bits & 2)) // car_render_buy draws no floor mirror
         add_mirror(r, page, 0.65f * fade * std::clamp(reflect, 0.0f, 1.0f), [&](int w, int h) {
             render::DrawOptions o = showroom_options(cam, view, true, env, reflect);
+            supersample(app, o, w, h);
             o.clear[0] = o.clear[1] = o.clear[2] = 0;
             o.clear[3] = 1;
             // The game mirrors with (1, -1, 1); we use (-1, -1, 1), a rotation, so the faces
@@ -392,6 +404,7 @@ private:
         });
         composite(r, page, [&](SDL_Texture* tex, int w, int h, float bg) {
             render::DrawOptions o = showroom_options(cam, view, false, env, reflect);
+            supersample(app, o, w, h);
             o.clear[0] = o.clear[1] = o.clear[2] = bg;
             o.clear[3] = 1;
             render::View3D& v = bg > 0.5f ? *view_white_ : *view_black_;
