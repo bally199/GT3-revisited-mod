@@ -158,7 +158,7 @@ private:
     // read back from the 2D renderer's targets (<path>-<frame>-<step>.png), for frames
     // first..first+count-1 counted from the first showroom frame.
     // GT3R_SHOWROOM=<bits>: 1 one pass (no jitter scratch target), 2 no floor mirror, 4 no W - B
-    // composite (the car over black copied onto the page).
+    // composite (the car over black copied onto the page), 8 the 4 jitter passes on Xbox.
     struct Capture2D {
         bool parsed = false;
         int first = 0, count = 0, frames = 0, last = -1, bits = 0;
@@ -267,6 +267,13 @@ private:
         // composite, which a tile-based mobile GPU pays for in full (5 fps on a Galaxy A15).
         if (platform::is_mobile()) passes = 1;
         diag_frame();
+#if GT3R_UWP
+        // Xbox (OpenGL ES on ANGLE): one pass too. With the jitter passes' scratch target every
+        // other frame came out wrong (white, or the picture over white from earlier frames across
+        // the whole screen) below 200% render scale, while every step read back was right.
+        // GT3R_SHOWROOM bit 8 brings the 4 passes back (tests).
+        if (!(cap2d_.bits & 8)) passes = 1;
+#endif
         if (cap2d_.bits & 1) passes = 1;
         if (show_.key != entry) {
             show_ = Showroom{};

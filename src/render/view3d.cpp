@@ -399,12 +399,12 @@ View3D::~View3D() {
 }
 
 void View3D::release_target() {
-    for (SDL_Texture** w : {&wrapper_, &half_wrapper_, &present_wrapper_}) {
+    for (SDL_Texture** w : {&wrapper_, &half_wrapper_}) {
         if (*w) SDL_DestroyTexture(*w);
         *w = nullptr;
     }
     SDL_GPUDevice* dev = ctx_.device();
-    for (SDL_GPUTexture** t : {&color_, &msaa_, &depth_, &scene_, &last_, &snap_, &half_, &present_, &haze_src_, &dof_}) {
+    for (SDL_GPUTexture** t : {&color_, &msaa_, &depth_, &scene_, &last_, &snap_, &half_, &haze_src_, &dof_}) {
         if (*t) SDL_ReleaseGPUTexture(dev, *t);
         *t = nullptr;
     }
@@ -692,28 +692,6 @@ void View3D::draw(SDL_Renderer* renderer, const SDL_FRect& rect, const Mat4& vie
         SDL_BlitGPUTexture(cmd, &bi);
         shown = half_wrapper_, tw = half_w_, th = half_h_;
     }
-#if GT3R_UWP
-    // Xbox (OpenGL ES on ANGLE, Direct3D 11.0): the 2D renderer showed car select's pictures
-    // corrupt (white washes, other textures) below 200% while they were right in the target (a
-    // 3D capture) and right halved (above 200%: a shader draw writes half_). Read straight from a
-    // target written by a resolve or a copy, they came out wrong; so an opaque picture is redrawn
-    // 1:1 by a shader (the post pass) into a texture of its own, and that is what is shown.
-    // (Transparent ones keep color_: the post pass writes alpha 1.)
-    else if (ctx_.gles() && !(opt.clear[3] < 1.0f || opt.composite_alpha < 1.0f) && ensure_post(&present_)) {
-        if (!present_wrapper_) present_wrapper_ = wrap_texture(renderer, present_, width_, height_);
-        SDL_GPUColorTargetInfo ct{};
-        ct.texture = present_;
-        ct.load_op = SDL_GPU_LOADOP_DONT_CARE;
-        ct.store_op = SDL_GPU_STOREOP_STORE;
-        SDL_GPURenderPass* pp = present_wrapper_ ? SDL_BeginGPURenderPass(cmd, &ct, 1, nullptr) : nullptr;
-        if (pp) {
-            encode_post(cmd, pp, color_, pw, ph, 1.0f, nullptr);
-            SDL_EndGPURenderPass(pp);
-            SDL_SetTextureScaleMode(present_wrapper_, opt.nearest ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR);
-            shown = present_wrapper_;
-        }
-    }
-#endif
     SDL_SubmitGPUCommandBuffer(cmd);
     if (capture_.count > 0 && capture_.frame == capture_.first + capture_.count) write_capture();
 
