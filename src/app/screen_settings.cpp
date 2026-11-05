@@ -23,6 +23,7 @@
 #include "platform/user_files.h"
 #include "race/exact_setup.h"
 #include "sim/exact/program_data.h"
+#include "video/movie_player.h"
 
 #include <algorithm>
 #include <cmath>
@@ -706,6 +707,16 @@ private:
                            });
         rims.enabled = scale.enabled;
         if (!rims.enabled) rims.desc = msaa.desc;
+
+        // [video] movie_deinterlace = on | off (default on; video/deinterlace.h)
+        toggle("Full-detail movies",
+               "Most of GT3's movies hold two half-height pictures a frame. On: each made whole, still parts "
+               "at full detail. Off: each stretched to full height.",
+               video::MoviePlayer::deinterlace(), [a](bool v) {
+                   video::MoviePlayer::set_deinterlace(v);
+                   a->config().set("video", "movie_deinterlace", v ? "on" : "off");
+                   a->save_config();
+               });
 
         // [video] heat_haze = on | off (default off; RaceScreen::add_screen_passes)
         Row& haze = toggle("Heat haze in replays",

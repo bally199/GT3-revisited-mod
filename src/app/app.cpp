@@ -17,6 +17,7 @@
 #include "platform/recent_discs.h"
 #include "platform/render_scale.h"
 #include "platform/mac_layer.h"
+#include "video/movie_player.h"
 
 #include <algorithm>
 #include <atomic>
@@ -213,6 +214,7 @@ bool App::init(int argc, char** argv) {
     if (auto v = config_.get("video", "spin_copies")) gpu_opts.spin_copies = to_lower(*v) != "off";
     if (auto v = config_.get("video", "gles_probe")) gpu_opts.gles_probe = std::atoi(v->c_str());
     show_fps_ = to_lower(config_.get("video", "show_fps").value_or("off")) == "on";
+    video::MoviePlayer::set_deinterlace(to_lower(config_.get("video", "movie_deinterlace").value_or("on")) != "off");
     gamma_ = render::parse_gamma(config_.get("video", "gamma").value_or(""));
     // [video] render_scale = auto | 0.5..4.0 (auto: native on desktop, capped on mobile)
     std::optional<float> render_scale = platform::parse_render_scale(config_.get("video", "render_scale").value_or("auto"));

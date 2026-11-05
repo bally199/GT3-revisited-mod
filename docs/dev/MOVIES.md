@@ -137,7 +137,18 @@ offset (first field on even frame lines, second on odd: source rows mapped
 with +1/4 resp. −1/4 field line, drawn over frame rows [0, H−1) resp.
 [1, H)), so static detail does not bob up and down; the rectangles stay
 inside each field's half of the texture, so the halves never bleed into
-each other. CORE.GT3's own movie table carries the same distinction as a
+each other.
+
+With `[video] movie_deinterlace = on` (the default; Settings → Display →
+Full-detail movies) the player instead makes each field a progressive picture
+(`FieldDeinterlacer`, `src/video/deinterlace.*`) and shows those, whole, at
+the fields' times: each keeps its own field's lines and fills the others
+motion-adaptively after yadif's rule (the other field's neighbouring line in
+time, held within the frame-to-frame change of that spot of the spatial guess),
+so still parts show all 448 / 512 lines and moving parts are interpolated
+without combing. The second field's picture takes its gaps from the first
+field of the same frame only (the next frame is not decoded when it shows).
+Chroma is each field's own, interpolated. CORE.GT3's own movie table carries the same distinction as a
 per-movie flag (pss.md).
 
 ## Game-flow API

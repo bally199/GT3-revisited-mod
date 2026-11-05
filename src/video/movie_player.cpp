@@ -21,11 +21,29 @@ constexpr double kAudioJump = 0.1; // seconds off the audio position: jump there
 constexpr double kEarly = 0.002;
 
 u64 now_ns(const std::function<u64()>& now) { return now ? now() : SDL_GetTicksNS(); }
+
+std::atomic<bool> g_deinterlace{true};
+
+bool upload(SDL_Renderer* renderer, SDL_Texture*& texture, const Frame& f) {
+    if (!texture) {
+        texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING, f.width, f.height);
+        if (!texture) {
+            LOG_ERROR("Cannot create movie texture: %s", SDL_GetError());
+            return false;
+        }
+    }
+    return SDL_UpdateYUVTexture(texture, nullptr, f.y.data(), f.width, f.u.data(), f.chroma_width(), f.v.data(),
+                                f.chroma_width());
+}
 } // namespace
+
+void MoviePlayer::set_deinterlace(bool on) { g_deinterlace = on; }
+bool MoviePlayer::deinterlace() { return g_deinterlace; }
 
 MoviePlayer::~MoviePlayer() {
     stop();
     if (texture_) SDL_DestroyTexture(texture_);
+    if (texture2_) SDL_DestroyTexture(texture2_);
 }
 
 void MoviePlayer::start(std::unique_ptr<Movie> movie, float volume, double start_seconds) {
@@ -55,6 +73,8 @@ void MoviePlayer::begin(std::unique_ptr<Movie> movie, float volume, double start
     audio_frames_put_ = 0;
     field_split_ = false;
     layout_ = FieldLayoutDetector();
+    deint_.reset();
+    deinterlaced_ = false;
     ready_.clear();
 
     if (info_.has_audio) {
@@ -228,7 +248,7 @@ void MoviePlayer::picture_rects(const SDL_FRect& display, SDL_FRect& src, SDL_FR
     float w = float(tex_w_), h = float(tex_h_);
     src = {0, 0, w, h};
     dst = display;
-    if (!field_split_ || tex_h_ < 4) return;
+    if (!field_split_ || deinterlaced_ || tex_h_ < 4) return;
     // First field (top half, even frame lines) for the first half of the frame
     // period, then the second field (bottom half, odd lines). Frame line Y of
     // field line k is 2k (+1 for the second field), so mapping frame row
@@ -252,10 +272,11 @@ bool MoviePlayer::second_field() const {
 }
 
 void MoviePlayer::draw(SDL_Renderer* renderer, const SDL_FRect& display) const {
-    if (!texture_) return;
+    SDL_Texture* t = texture();
+    if (!t) return;
     SDL_FRect src, dst;
     picture_rects(display, src, dst);
-    SDL_RenderTexture(renderer, texture_, &src, &dst);
+    SDL_RenderTexture(renderer, t, &src, &dst);
 }
 
 double audio_clock_correction(double err, double step) {
@@ -338,17 +359,23 @@ bool MoviePlayer::update(SDL_Renderer* renderer) {
     }
     if (!have) return false;
 
-    if (!texture_ || tex_w_ != frame.width || tex_h_ != frame.height) {
-        if (texture_) SDL_DestroyTexture(texture_);
-        texture_ = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING, frame.width,
-                                     frame.height);
-        if (!texture_) LOG_ERROR("Cannot create movie texture: %s", SDL_GetError());
+    if (tex_w_ != frame.width || tex_h_ != frame.height) {
+        for (SDL_Texture** t : {&texture_, &texture2_})
+            if (*t) SDL_DestroyTexture(*t), *t = nullptr;
         tex_w_ = frame.width;
         tex_h_ = frame.height;
     }
-    if (texture_)
-        SDL_UpdateYUVTexture(texture_, nullptr, frame.y.data(), frame.width, frame.u.data(), frame.chroma_width(),
-                             frame.v.data(), frame.chroma_width());
+    // Field-split: the two fields' progressive pictures (deinterlace.h), or the frame as it is
+    // (picture_rects then shows one half at a time).
+    const bool deint = field_split_ && g_deinterlace && frame.height >= 4 && frame.height % 2 == 0;
+    if (deint) {
+        deint_.process(frame, deint_first_, deint_second_);
+        deinterlaced_ = upload(renderer, texture_, deint_first_) && upload(renderer, texture2_, deint_second_);
+    } else {
+        deint_.reset();
+        deinterlaced_ = false;
+    }
+    if (!deinterlaced_) upload(renderer, texture_, frame);
     std::lock_guard lock(mutex_);
     free_.push_back(std::move(frame));
     return true;

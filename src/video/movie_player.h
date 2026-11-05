@@ -9,6 +9,7 @@
 //   player.start(open_movie(vfs, "stream/opening.pss"));
 //   // every frame:  player.update(renderer);  draw player.texture()
 
+#include "video/deinterlace.h"
 #include "video/field_layout.h"
 #include "video/movie.h"
 
@@ -59,11 +60,17 @@ public:
     // Main thread, once per rendered frame: advances the clock and uploads
     // the frame that is due. Returns true when the texture changed.
     bool update(SDL_Renderer* renderer);
-    SDL_Texture* texture() const { return texture_; }
+    // The current picture: for a deinterlaced field-split movie the progressive picture of the
+    // field that is due.
+    SDL_Texture* texture() const { return deinterlaced_ && second_field() ? texture2_ : texture_; }
+    // Field-split movies made progressive (deinterlace.h; [video] movie_deinterlace, default on)
+    // rather than each field stretched to the full height. For every player, from its next frame.
+    static void set_deinterlace(bool on);
+    static bool deinterlace();
     // Source and destination rectangles for drawing the current picture into
-    // `display`: the whole frame, or for field-split movies (field_layout.h)
-    // the half holding the field that is due, positioned with the half-line
-    // offset of its field so the picture does not bob up and down.
+    // `display`: the whole frame, or for field-split movies (field_layout.h) not
+    // deinterlaced the half holding the field that is due, positioned with the
+    // half-line offset of its field so the picture does not bob up and down.
     void picture_rects(const SDL_FRect& display, SDL_FRect& src, SDL_FRect& dst) const;
     // Draws the current picture into `display` (no-op before the first frame).
     void draw(SDL_Renderer* renderer, const SDL_FRect& display) const;
@@ -136,7 +143,11 @@ private:
     float volume_ = 0.8f;
 
     SDL_Texture* texture_ = nullptr;
+    SDL_Texture* texture2_ = nullptr; // deinterlaced: the second field's picture (texture_ the first's)
     int tex_w_ = 0, tex_h_ = 0;
+    FieldDeinterlacer deint_;
+    Frame deint_first_, deint_second_;
+    bool deinterlaced_ = false; // the textures hold a deinterlaced pair
     double clock_ = 0;
     double shown_time_ = 0; // presentation time of the frame in the texture
     u64 last_ticks_ = 0;
