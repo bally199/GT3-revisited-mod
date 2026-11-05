@@ -334,6 +334,21 @@ void InputManager::assign_devices() {
                         p.device = d.id;
                         break;
                     }
+#if GT3R_UWP
+                // Xbox: a pad's name follows the console's language (a UK locale on a Dev Mode
+                // console reported it pseudo-localised), so a controller chosen by name can stop
+                // matching, and the console has a keyboard as far as SDL knows, so the menus'
+                // any-pad rescue never came: player 1 had no controller at all. Player 1 gets a
+                // pad as with Auto when theirs by name is not there.
+                if (!p.device && i == 0)
+                    for (const Device& d : devices_)
+                        if (!is_taken(d.id) && d.gamepad) {
+                            LOG_INFO("Controller \"%s\" not connected: player 1 uses %s", p.device_filter.c_str(),
+                                     d.name.c_str());
+                            p.device = d.id;
+                            break;
+                        }
+#endif
             }
             const Device* d = find_device(p.device);
             p.kind = device_kind(d != nullptr, d && d->gamepad, d && d->wheel,
