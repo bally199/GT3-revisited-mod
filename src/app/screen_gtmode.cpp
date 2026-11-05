@@ -250,8 +250,10 @@ private:
             show_.elev += show_.elev_v / 60.0f;
             ++show_.frames;
         }
-        if (!view_black_) view_black_ = std::make_unique<render::View3D>(*app.gpu());
-        if (!view_white_) view_white_ = std::make_unique<render::View3D>(*app.gpu());
+        // GT3R_CAPTURE3D=<first>,<count>,<path>: the car pages' 3D frames as PNGs (the black and the
+        // white background's views apart), as in races (View3D::capture_from_env).
+        if (!view_black_) view_black_ = std::make_unique<render::View3D>(*app.gpu()), view_black_->capture_from_env("black");
+        if (!view_white_) view_white_ = std::make_unique<render::View3D>(*app.gpu()), view_white_->capture_from_env("white");
         // The game's yaw in degrees: 180 = in front of the car (the timed reference shows it
         // head-on ~2 s after entry), 90 = the side, nose to the right (~6 s).
         const float yaw = show_.yaw * 3.14159265f / 180.0f;
@@ -392,8 +394,10 @@ private:
             static const int kIdx[6] = {0, 1, 2, 1, 3, 2};
             SDL_RenderGeometry(r, light, v, 4, kIdx, 6);
         };
-        if (!view_black_) view_black_ = std::make_unique<render::View3D>(*app.gpu());
-        if (!view_white_) view_white_ = std::make_unique<render::View3D>(*app.gpu());
+        // GT3R_CAPTURE3D=<first>,<count>,<path>: the car pages' 3D frames as PNGs (the black and the
+        // white background's views apart), as in races (View3D::capture_from_env).
+        if (!view_black_) view_black_ = std::make_unique<render::View3D>(*app.gpu()), view_black_->capture_from_env("black");
+        if (!view_white_) view_white_ = std::make_unique<render::View3D>(*app.gpu()), view_white_->capture_from_env("white");
         auto draw_cars = [&](bool lit, float opacity) {
             std::vector<render::DrawItem> items;
             for (size_t i = 0; i < sc.cars.size(); ++i) {
@@ -528,8 +532,10 @@ private:
     // then page = page * (W - B) + B.
     void render(App& app, SDL_Renderer* r, const SDL_FRect& dst, const Loaded& m, float zoom, float pitch,
                 float yaw = -1000, float ambient = -1, float fovy = 0.8f, int lights = 0) {
-        if (!view_black_) view_black_ = std::make_unique<render::View3D>(*app.gpu());
-        if (!view_white_) view_white_ = std::make_unique<render::View3D>(*app.gpu());
+        // GT3R_CAPTURE3D=<first>,<count>,<path>: the car pages' 3D frames as PNGs (the black and the
+        // white background's views apart), as in races (View3D::capture_from_env).
+        if (!view_black_) view_black_ = std::make_unique<render::View3D>(*app.gpu()), view_black_->capture_from_env("black");
+        if (!view_white_) view_white_ = std::make_unique<render::View3D>(*app.gpu()), view_white_->capture_from_env("white");
         render::OrbitCamera cam;
         cam.frame(m.bmin, m.bmax);
         cam.distance *= zoom * std::tan(cam.fovy * 0.5f) / std::tan(fovy * 0.5f); // same framing, longer lens

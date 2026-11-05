@@ -211,6 +211,7 @@ bool App::init(int argc, char** argv) {
     if (auto v = config_.get("video", "gpu_debug")) gpu_opts.debug = *v == "1";
     if (auto v = config_.get("video", "gles_base_vertex")) gpu_opts.base_vertex = to_lower(*v) != "off";
     if (auto v = config_.get("video", "spin_copies")) gpu_opts.spin_copies = to_lower(*v) != "off";
+    if (auto v = config_.get("video", "gles_probe")) gpu_opts.gles_probe = std::atoi(v->c_str());
     show_fps_ = to_lower(config_.get("video", "show_fps").value_or("off")) == "on";
     gamma_ = render::parse_gamma(config_.get("video", "gamma").value_or(""));
     // [video] render_scale = auto | 0.5..4.0 (auto: native on desktop, capped on mobile)
@@ -293,7 +294,11 @@ bool App::init(int argc, char** argv) {
         std::unique_ptr<AudioEngine> engine;
         const std::string audio_device = config_.get("audio", "device").value_or("");
         std::thread audio_thread([&] {
-            engine = std::make_unique<AudioEngine>(audio_device);
+            try {
+                engine = std::make_unique<AudioEngine>(audio_device);
+            } catch (const std::exception& ex) { // (an exception leaving a thread ends the program)
+                LOG_ERROR("Audio: %s", ex.what());
+            }
             audio_done = true;
         });
         const Uint64 audio_start = SDL_GetTicks();
@@ -345,6 +350,11 @@ bool App::init(int argc, char** argv) {
         }
         else if (!a.empty() && a[0] != '-') disc_path = a;
     }
+#if GT3R_GLES
+    // GT3R_GLES_PROBE (args.txt: --env GT3R_GLES_PROBE=<bits>, read after the GPU was opened).
+    if (const char* probe = SDL_getenv("GT3R_GLES_PROBE"); probe && *probe && gpu_ && gpu_->gles())
+        render::gles::set_probe(std::atoi(probe));
+#endif
     UWP_STEP("disc");
     if (!disc_path.empty()) last_error_ = open_disc(disc_path);
     else open_saved_disc(config_.get("game", "disc").value_or(""));

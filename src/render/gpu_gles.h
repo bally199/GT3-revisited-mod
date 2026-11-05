@@ -39,6 +39,8 @@ bool active();
 bool angle();
 // Draws without glDrawElementsInstancedBaseVertex from now on (GpuOptions::base_vertex).
 void disable_base_vertex();
+// Diagnostic probes: SDL_GPUDevice::probe in gpu_gles.cpp ([video] gles_probe, GT3R_GLES_PROBE).
+void set_probe(int bits);
 // GL_VERSION and GL_RENDERER of the context, e.g. "OpenGL ES 3.0.0 (ANGLE ...); ANGLE (NVIDIA
 // GeForce GT 520M Direct3D11 ...)"; empty before SDL_CreateGPURenderer.
 const char* description();

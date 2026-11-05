@@ -113,7 +113,7 @@ index 122fc8f..93ba4b8 100644
  }
  
 diff --git a/src/audio/wasapi/SDL_wasapi_winrt.cpp b/src/audio/wasapi/SDL_wasapi_winrt.cpp
-index 3ef3cb2..a19561d 100644
+index 3ef3cb2..48b5114 100644
 --- a/src/audio/wasapi/SDL_wasapi_winrt.cpp
 +++ b/src/audio/wasapi/SDL_wasapi_winrt.cpp
 @@ -46,6 +46,8 @@ using namespace Windows::Devices::Enumeration;
@@ -125,9 +125,13 @@ index 3ef3cb2..a19561d 100644
  
  static Platform::String ^ SDL_PKEY_AudioEngine_DeviceFormat = L"{f19f064d-082c-4e27-bc73-6882a1bb8e4c} 0";
  
-@@ -262,18 +264,70 @@ class SDL_WasapiActivationHandler : public RuntimeClass<RuntimeClassFlags<Classi
+@@ -261,19 +263,95 @@ class SDL_WasapiActivationHandler : public RuntimeClass<RuntimeClassFlags<Classi
+ {
  public:
      SDL_WasapiActivationHandler() : completion_semaphore(SDL_CreateSemaphore(0)) { SDL_assert(completion_semaphore != NULL); }
++    // (After a timed-out wait the semaphore is left for ActivateCompleted; the system holds the
++    // last reference until that has run.)
++    ~SDL_WasapiActivationHandler() { if (completion_semaphore) SDL_DestroySemaphore(completion_semaphore); }
      STDMETHOD(ActivateCompleted)(IActivateAudioInterfaceAsyncOperation *operation);
 -    void WaitForCompletion();
 +    bool WaitForCompletion(Sint32 timeout_ms);
@@ -156,12 +160,25 @@ index 3ef3cb2..a19561d 100644
 +// events; the app must keep pumping while a device opens (SDL_OpenAudioDevice on another thread).
 +struct SDL_WasapiActivateCall
 +{
-+    LPCWSTR devid;
++    WCHAR *devid; // a copy: device->handle may be freed before a late UI thread runs the call
 +    IActivateAudioInterfaceCompletionHandler *handler;
 +    IActivateAudioInterfaceAsyncOperation *async;
 +    HRESULT result;
 +    SDL_Semaphore *done;
++    SDL_AtomicInt state; // 0 pending, 1 run by the UI thread, 2 given up by the waiter
 +};
++
++static void WINRT_FreeActivateCall(SDL_WasapiActivateCall *call)
++{
++    if (call->async) {
++        call->async->Release();
++    }
++    SDL_free(call->devid);
++    if (call->done) {
++        SDL_DestroySemaphore(call->done);
++    }
++    delete call;
++}
 +
 +static HRESULT WINRT_ActivateAudioInterface(LPCWSTR devid, IActivateAudioInterfaceCompletionHandler *handler,
 +                                            IActivateAudioInterfaceAsyncOperation **async)
@@ -176,30 +193,38 @@ index 3ef3cb2..a19561d 100644
 +        return ActivateAudioInterfaceAsync(devid, __uuidof(IAudioClient), nullptr, handler, async);
 +    }
 +    // On the heap: if the UI thread never gets to it, the call may still run after we gave up.
-+    SDL_WasapiActivateCall *call = new SDL_WasapiActivateCall{ devid, handler, nullptr, E_FAIL, SDL_CreateSemaphore(0) };
-+    if (!call->done) {
-+        delete call;
++    SDL_WasapiActivateCall *call = new SDL_WasapiActivateCall{ SDL_wcsdup(devid), handler, nullptr, E_FAIL, SDL_CreateSemaphore(0) };
++    SDL_SetAtomicInt(&call->state, 0);
++    if (!call->done || !call->devid) {
++        WINRT_FreeActivateCall(call);
 +        return E_OUTOFMEMORY;
 +    }
 +    handler->AddRef(); // for the call, released when it has run
 +    dispatcher->RunAsync(CoreDispatcherPriority::Normal, ref new DispatchedHandler([call]() {
 +        call->result = ActivateAudioInterfaceAsync(call->devid, __uuidof(IAudioClient), nullptr, call->handler, &call->async);
 +        call->handler->Release();
-+        SDL_SignalSemaphore(call->done);
++        if (SDL_CompareAndSwapAtomicInt(&call->state, 0, 1)) {
++            SDL_SignalSemaphore(call->done); // the waiter is still there and takes `async`
++        } else {
++            WINRT_FreeActivateCall(call); // given up on: nobody takes the result
++        }
 +    }));
 +    if (!SDL_WaitSemaphoreTimeout(call->done, 10000)) {
-+        SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "WASAPI: the UI thread did not run the device activation within 10 s");
-+        return HRESULT_FROM_WIN32(ERROR_TIMEOUT); // `call` is left to the dispatched handler
++        if (SDL_CompareAndSwapAtomicInt(&call->state, 0, 2)) {
++            SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "WASAPI: the UI thread did not run the device activation within 10 s");
++            return HRESULT_FROM_WIN32(ERROR_TIMEOUT); // the dispatched handler frees `call`
++        }
++        SDL_WaitSemaphore(call->done); // it ran just now: its result after all
 +    }
 +    const HRESULT result = call->result;
 +    *async = call->async;
-+    SDL_DestroySemaphore(call->done);
-+    delete call;
++    call->async = nullptr; // the caller's now
++    WINRT_FreeActivateCall(call);
 +    return result;
  }
  
  HRESULT
-@@ -303,18 +357,26 @@ bool WASAPI_ActivateDevice(SDL_AudioDevice *device)
+@@ -303,18 +381,26 @@ bool WASAPI_ActivateDevice(SDL_AudioDevice *device)
      device->hidden->activation_handler = handler.Get();
  
      IActivateAudioInterfaceAsyncOperation *async = nullptr;
@@ -228,7 +253,7 @@ index 3ef3cb2..a19561d 100644
  
      HRESULT activateRes = S_OK;
      IUnknown *iunknown = nullptr;
-@@ -326,7 +388,9 @@ bool WASAPI_ActivateDevice(SDL_AudioDevice *device)
+@@ -326,7 +412,9 @@ bool WASAPI_ActivateDevice(SDL_AudioDevice *device)
          return WIN_SetErrorFromHRESULT("Failed to activate WASAPI device", activateRes);
      }
  

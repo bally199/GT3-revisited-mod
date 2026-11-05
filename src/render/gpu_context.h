@@ -87,6 +87,7 @@ struct GpuOptions {
     // ([video] spin_copies; off: one rim). Switches for drivers that get them wrong.
     bool base_vertex = true;
     bool spin_copies = true;
+    int gles_probe = 0; // OpenGL ES diagnostic probes (gles::set_probe; [video] gles_probe)
     // VR builds (GT3R_XR): create the device through the headset's OpenXR runtime when there is
     // one; the 2D renderer then draws offscreen (canvases of xr::Session) instead of the window.
     bool xr = false;

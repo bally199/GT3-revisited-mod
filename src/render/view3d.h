@@ -377,7 +377,7 @@ public:
     // GT3R_CAPTURE3D=<first>,<count>,<path.png>: copies this view's frames <first>.. on the GPU
     // and writes them as <path>-<k>.png after the last one. Unlike --shot (SDL_RenderReadPixels
     // waits for the GPU every frame) the frames stay in flight as in play: for flicker checks.
-    void capture_from_env();
+    void capture_from_env(const char* tag = nullptr);
 
 private:
     bool frame_alpha_written_ = false; // a DrawItem::frame_alpha pass wrote the target alpha this draw
@@ -386,7 +386,6 @@ private:
     bool ensure_target(SDL_Renderer* renderer, int w, int h);
     void release_target();
     bool ensure_half(SDL_Renderer* renderer);
-    bool ensure_present(SDL_Renderer* renderer);
     bool ensure_cube(int size);
     void release_cube();
     SDL_GPUTexture* placeholder_cube();
@@ -488,10 +487,6 @@ private:
     SDL_GPUTexture* half_ = nullptr;
     SDL_Texture* half_wrapper_ = nullptr;
     int half_w_ = 0, half_h_ = 0;
-    // Xbox (OpenGL ES on ANGLE, Direct3D 11.0): the picture copied 1:1 for the 2D renderer
-    // (present_, as present_wrapper_); see View3D::draw.
-    SDL_GPUTexture* present_ = nullptr;
-    SDL_Texture* present_wrapper_ = nullptr;
     // Supersampled targets that failed (GPU memory) lower this view's most: 75% of the failed
     // size each time, down to native.
     float scale_cap_ = platform::kMaxRenderScale;

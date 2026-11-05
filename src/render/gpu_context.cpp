@@ -127,6 +127,7 @@ bool GpuContext::open_gles(SDL_Window* window, const GpuOptions& options) {
     }
     gles_ = true;
     if (!options.base_vertex) gles::disable_base_vertex();
+    if (options.gles_probe) gles::set_probe(options.gles_probe);
     return true;
 #else
     (void)window;

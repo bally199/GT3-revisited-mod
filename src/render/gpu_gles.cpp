@@ -319,6 +319,10 @@ struct SDL_GPUDevice {
     SDL_Renderer* renderer = nullptr; // SDL's GLES2 renderer: owns the OpenGL ES context
     bool debug = false;               // GL error checks (off: a no-error context where offered)
     bool angle = true;                // Windows: ANGLE when bundled (off: the driver's OpenGL ES)
+    // Diagnostic probes ([video] gles_probe, or GT3R_GLES_PROBE): 1 = clear colours and depth
+    // nudged off exact 0 / 1 (the same stored values, but no metadata-only fast clear), 2 =
+    // glFinish after every pass and blit (no GPU-side reordering). For the Xbox's car select.
+    int probe = 0;
     std::string description;          // gles::description()
     GLint ubo_align = 256;
     bool aniso = false;
@@ -702,14 +706,18 @@ void run_pass(SDL_GPURenderPass* pass) {
 
     if (ct && pass->color.load_op == SDL_GPU_LOADOP_CLEAR) {
         const SDL_FColor& c = pass->color.clear_color;
-        const GLfloat v[4] = {c.r, c.g, c.b, c.a};
+        GLfloat v[4] = {c.r, c.g, c.b, c.a};
+        if (dev->probe & 1) // the same 8-bit values, but not a fast (0 / 1) clear
+            for (GLfloat& x : v) x = x <= 0.0f ? 1.0f / 1024 : x >= 1.0f ? 1.0f - 1.0f / 1024 : x;
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glClearBufferfv(GL_COLOR, 0, v);
     }
     if (dt && pass->depth.load_op == SDL_GPU_LOADOP_CLEAR) {
         glDepthMask(GL_TRUE);
-        if (dt->fmt.stencil) glClearBufferfi(GL_DEPTH_STENCIL, 0, pass->depth.clear_depth, pass->depth.clear_stencil);
-        else glClearBufferfv(GL_DEPTH, 0, &pass->depth.clear_depth);
+        GLfloat depth = pass->depth.clear_depth;
+        if (dev->probe & 1) depth = depth <= 0.0f ? 1.0f / 65536 : depth >= 1.0f ? 1.0f - 1.0f / 65536 : depth;
+        if (dt->fmt.stencil) glClearBufferfi(GL_DEPTH_STENCIL, 0, depth, pass->depth.clear_stencil);
+        else glClearBufferfv(GL_DEPTH, 0, &depth);
     }
 
     if (!pass->draws.empty()) {
@@ -750,6 +758,7 @@ void run_pass(SDL_GPURenderPass* pass) {
 
     restore_defaults();
     glBindFramebuffer(GL_FRAMEBUFFER, GLuint(saved_fb));
+    if (dev->probe & 2) glFinish();
     check_gl(dev, "a render pass");
 }
 
@@ -771,6 +780,13 @@ SDL_GPUDevice* create_device(bool debug, bool angle) {
 bool active() { return g_device != nullptr; }
 
 bool angle() { return g_device && g_device->angle; }
+
+void set_probe(int bits) {
+    if (!g_device) return;
+    g_device->probe = bits;
+    if (bits) LOG_INFO("OpenGL ES: probes %d (clears off 0 / 1: %s, finish after passes: %s)", bits,
+                       bits & 1 ? "on" : "off", bits & 2 ? "on" : "off");
+}
 
 void disable_base_vertex() {
     if (!g_device || !g_device->draw_base_vertex) return;
@@ -1407,6 +1423,7 @@ void gt3r_gl_BlitGPUTexture(SDL_GPUCommandBuffer* cmd, const SDL_GPUBlitInfo* in
     attach(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, nullptr, 0, 0);
     attach(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, nullptr, 0, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, GLuint(saved));
+    if (dev->probe & 2) glFinish();
 }
 
 void gt3r_gl_GenerateMipmapsForGPUTexture(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* t) {
