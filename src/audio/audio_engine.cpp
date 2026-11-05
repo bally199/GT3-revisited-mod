@@ -44,10 +44,20 @@ private:
     std::unique_ptr<AdsStream> s_;
 };
 
+// Xbox: gt3r.log names each step of opening the output (a start once stopped in here).
+#if GT3R_UWP
+#define UWP_AUDIO_STEP(...) LOG_INFO("Audio: " __VA_ARGS__)
+#else
+#define UWP_AUDIO_STEP(...) ((void)0)
+#endif
+
 // Opens a device for each stream on physical device `phys`; false (none left open) if either fails.
 bool open_pair(SDL_AudioDeviceID phys, SDL_AudioDeviceID& music, SDL_AudioDeviceID& voices) {
+    UWP_AUDIO_STEP("opening the music device");
     music = SDL_OpenAudioDevice(phys, &kMusicSpec);
+    UWP_AUDIO_STEP("opening the effects device");
     voices = music ? SDL_OpenAudioDevice(phys, &kVoiceSpec) : 0;
+    UWP_AUDIO_STEP("devices %s", voices ? "open" : "failed");
     if (voices) return true;
     if (music) SDL_CloseAudioDevice(music);
     return false;
@@ -117,6 +127,7 @@ bool AudioEngine::use_device(SDL_AudioDeviceID phys) {
         if (!open_pair(phys, music, voices)) return false;
     }
     SDL_AudioDeviceID old_music = 0, old_voices = 0;
+    UWP_AUDIO_STEP("binding the streams");
     {
         std::lock_guard lock(device_mutex_);
         old_music = move_stream(music_stream_, music);

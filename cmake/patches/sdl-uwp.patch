@@ -32,8 +32,88 @@ index 9998abe..816a9ad 100644
    elseif(MACOS)
      sdl_sources(${SDL3_SOURCE_DIR}/src/dialog/cocoa/SDL_cocoadialog.m)
      set(HAVE_SDL_DIALOG TRUE)
+diff --git a/src/audio/SDL_audio.c b/src/audio/SDL_audio.c
+index aed406c..900a228 100644
+--- a/src/audio/SDL_audio.c
++++ b/src/audio/SDL_audio.c
+@@ -1844,6 +1844,7 @@ static bool OpenPhysicalAudioDevice(SDL_AudioDevice *device, const SDL_AudioSpec
+     SDL_UpdatedAudioDeviceFormat(device);  // start this off sane.
+ 
+     device->currently_opened = true;  // mark this true even if impl.OpenDevice fails, so we know to clean up.
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "Opening physical device %s", device->name);
+     if (!current_audio.impl.OpenDevice(device)) {
+         ClosePhysicalAudioDevice(device);  // clean up anything the backend left half-initialized.
+         return false;
+@@ -1871,6 +1872,7 @@ static bool OpenPhysicalAudioDevice(SDL_AudioDevice *device, const SDL_AudioSpec
+         char threadname[64];
+         SDL_GetAudioThreadName(device, threadname, sizeof (threadname));
+         device->thread = SDL_CreateThread(device->recording ? RecordingAudioThread : PlaybackAudioThread, threadname, device);
++        SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "Audio thread %s %s", threadname, device->thread ? "started" : "failed");
+ 
+         if (!device->thread) {
+             ClosePhysicalAudioDevice(device);
+diff --git a/src/audio/wasapi/SDL_wasapi.c b/src/audio/wasapi/SDL_wasapi.c
+index 122fc8f..93ba4b8 100644
+--- a/src/audio/wasapi/SDL_wasapi.c
++++ b/src/audio/wasapi/SDL_wasapi.c
+@@ -672,6 +672,7 @@ static bool mgmtthrtask_PrepDevice(void *userdata)
+     HRESULT ret;
+ 
+     WAVEFORMATEX *waveformat = NULL;
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI: prep: mix format");
+     ret = IAudioClient_GetMixFormat(client, &waveformat);
+     if (FAILED(ret)) {
+         return WIN_SetErrorFromHRESULT("WASAPI can't determine mix format", ret);
+@@ -699,6 +700,7 @@ static bool mgmtthrtask_PrepDevice(void *userdata)
+     }
+ 
+     REFERENCE_TIME default_period = 0;
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI: prep: device period");
+     ret = IAudioClient_GetDevicePeriod(client, &default_period, NULL);
+     if (FAILED(ret)) {
+         return WIN_SetErrorFromHRESULT("WASAPI can't determine minimum device period", ret);
+@@ -774,6 +776,7 @@ static bool mgmtthrtask_PrepDevice(void *userdata)
+     }
+ #endif
+ 
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI: prep: shared stream");
+ #ifdef __IAudioClient3_INTERFACE_DEFINED__
+     // Try querying IAudioClient3 if sharemode is AUDCLNT_SHAREMODE_SHARED
+     if (sharemode == AUDCLNT_SHAREMODE_SHARED) {
+@@ -803,6 +806,7 @@ static bool mgmtthrtask_PrepDevice(void *userdata)
+     }
+ #endif
+ 
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI: prep: initialize");
+     if (!iaudioclient3_initialized)
+         ret = IAudioClient_Initialize(client, sharemode, streamflags, 0, 0, waveformat, NULL);
+ 
+@@ -816,6 +820,7 @@ static bool mgmtthrtask_PrepDevice(void *userdata)
+     }
+ 
+     UINT32 bufsize = 0; // this is in sample frames, not samples, not bytes.
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI: prep: buffer size");
+     ret = IAudioClient_GetBufferSize(client, &bufsize);
+     if (FAILED(ret)) {
+         return WIN_SetErrorFromHRESULT("WASAPI can't determine buffer size", ret);
+@@ -858,6 +863,7 @@ static bool mgmtthrtask_PrepDevice(void *userdata)
+         WASAPI_FlushRecording(device); // MSDN says you should flush the recording endpoint right after startup.
+     } else {
+         IAudioRenderClient *render = NULL;
++        SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI: prep: render client");
+         ret = IAudioClient_GetService(client, &SDL_IID_IAudioRenderClient, (void **)&render);
+         if (FAILED(ret)) {
+             return WIN_SetErrorFromHRESULT("WASAPI can't get render client service", ret);
+@@ -871,6 +877,7 @@ static bool mgmtthrtask_PrepDevice(void *userdata)
+         }
+     }
+ 
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI: prep: started");
+     return true; // good to go.
+ }
+ 
 diff --git a/src/audio/wasapi/SDL_wasapi_winrt.cpp b/src/audio/wasapi/SDL_wasapi_winrt.cpp
-index 3ef3cb2..9d15ad5 100644
+index 3ef3cb2..a19561d 100644
 --- a/src/audio/wasapi/SDL_wasapi_winrt.cpp
 +++ b/src/audio/wasapi/SDL_wasapi_winrt.cpp
 @@ -46,6 +46,8 @@ using namespace Windows::Devices::Enumeration;
@@ -148,6 +228,16 @@ index 3ef3cb2..9d15ad5 100644
  
      HRESULT activateRes = S_OK;
      IUnknown *iunknown = nullptr;
+@@ -326,7 +388,9 @@ bool WASAPI_ActivateDevice(SDL_AudioDevice *device)
+         return WIN_SetErrorFromHRESULT("Failed to activate WASAPI device", activateRes);
+     }
+ 
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI: activation result 0x%08lx", (unsigned long)activateRes);
+     iunknown->QueryInterface(IID_PPV_ARGS(&device->hidden->client));
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "WASAPI: client %s", device->hidden->client ? "ready" : "missing");
+     if (!device->hidden->client) {
+         return SDL_SetError("Failed to query WASAPI client interface");
+     }
 diff --git a/src/core/winrt/SDL_winrtapp_direct3d.cpp b/src/core/winrt/SDL_winrtapp_direct3d.cpp
 index 5b8817c..0bdffb8 100644
 --- a/src/core/winrt/SDL_winrtapp_direct3d.cpp
