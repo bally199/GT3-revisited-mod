@@ -303,7 +303,8 @@ void Ui::header(std::string_view title, std::string_view hint) {
 #if GT3R_UWP
 namespace {
 // Xbox: the hints name GT3's PlayStation buttons; the pad says A, B, X, Y. Whole words only, so
-// "start" in a sentence stays.
+// "start" in a sentence stays; "Start" and "Select", also words, only as a button: before ':' or
+// '/', after '/', or ending the hint ("Start race" stays).
 std::string xbox_button_names(std::string_view s) {
     static const std::pair<std::string_view, std::string_view> kNames[] = {
         {"Triangle", "Y"}, {"Circle", "B"}, {"Square", "X"}, {"Cross", "A"}, {"L1", "LB"}, {"R1", "RB"},
@@ -316,6 +317,10 @@ std::string xbox_button_names(std::string_view s) {
         if (i == 0 || !word(s[i - 1]))
             for (const auto& [from, to] : kNames)
                 if (s.substr(i, from.size()) == from && (i + from.size() == s.size() || !word(s[i + from.size()]))) {
+                    const size_t end = i + from.size();
+                    const bool both_ways = from == "Start" || from == "Select";
+                    if (both_ways && !(end == s.size() || s[end] == ':' || s[end] == '/' || (i > 0 && s[i - 1] == '/')))
+                        continue;
                     out += to;
                     i += from.size();
                     named = true;
