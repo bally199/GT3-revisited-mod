@@ -739,7 +739,14 @@ void run_pass(SDL_GPURenderPass* pass) {
     GLsizei nd = 0;
     if (ct && (store == SDL_GPU_STOREOP_DONT_CARE || store == SDL_GPU_STOREOP_RESOLVE)) discard[nd++] = GL_COLOR_ATTACHMENT0;
     if (dt && pass->depth.store_op == SDL_GPU_STOREOP_DONT_CARE) discard[nd++] = depth_attachment(dt);
+#if GT3R_UWP
+    // Xbox: no discards. ANGLE makes them real (Direct3D 11 DiscardView), and car select, which
+    // draws through the 2D renderer's targets pass after pass, came out with other textures' texels
+    // across the picture (desktop drivers mostly keep the contents; the hint is only a saving).
+    (void)discard, (void)nd;
+#else
     if (nd) glInvalidateFramebuffer(GL_FRAMEBUFFER, nd, discard);
+#endif
 
     restore_defaults();
     glBindFramebuffer(GL_FRAMEBUFFER, GLuint(saved_fb));
