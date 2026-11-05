@@ -47,10 +47,11 @@ struct UwpLogSetup {
     UwpLogSetup() {
         SDL_GetLogOutputFunction(&g_default_output, &g_default_userdata);
         SDL_SetLogOutputFunction(uwp_log_output, nullptr);
-        // SDL's own reports on video, rendering and the system (EGL, ANGLE, the window).
+        // SDL's own reports on video, rendering, audio and the system (EGL, ANGLE, the window).
         SDL_SetLogPriority(SDL_LOG_CATEGORY_VIDEO, SDL_LOG_PRIORITY_DEBUG);
         SDL_SetLogPriority(SDL_LOG_CATEGORY_RENDER, SDL_LOG_PRIORITY_DEBUG);
         SDL_SetLogPriority(SDL_LOG_CATEGORY_SYSTEM, SDL_LOG_PRIORITY_DEBUG);
+        SDL_SetLogPriority(SDL_LOG_CATEGORY_AUDIO, SDL_LOG_PRIORITY_DEBUG);
         SDL_SetLogPriority(SDL_LOG_CATEGORY_ERROR, SDL_LOG_PRIORITY_DEBUG);
     }
 };
