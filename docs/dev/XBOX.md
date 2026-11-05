@@ -14,6 +14,9 @@ below is the plan for the first build; expect a round or two of fixes.
 | The OpenGL ES renderer (`src/render/gpu_gles.cpp`) | The only 3D renderer in a UWP app: SDL_GPU has no backend there (no Vulkan; SDL's D3D12 needs DXIL shaders and a window handle). `GT3R_UWP` makes it the first choice. |
 | `cmake/Uwp.cmake`, `packaging/uwp/` | The package: manifest, tile images (`packaging/make_uwp_assets.py`), `SDL3.dll` and ANGLE's DLLs, signing. |
 
+Controls: GT3's own buttons with the PlayStation names: Cross is A, Circle is B, Triangle is Y
+(which leaves Settings and other menus), Square is X.
+
 Game changes under `GT3R_UWP`: always fullscreen; OpenGL ES (ANGLE) first; online codes typed
 on the game's own pad keyboard (as in VR); no update download (there is no Xbox package to
 fetch); no console, process or `gethostname` code; the system Back key that comes with each B press
@@ -63,14 +66,22 @@ deploy and debug on the Xbox directly.
 
 ## The disc image
 
-Copy your `.iso` (about 3.9 GB) to a USB drive formatted exFAT or NTFS and plug it into the
-console. At the first start the game asks for the disc; the picker shows the drive. The path is
-remembered like on other platforms.
+Dev Mode apps reach a USB drive only when it is **NTFS** and its permissions let in **ALL
+APPLICATION PACKAGES** (the group every UWP app runs as); exFAT, which has no permissions, and a
+plain NTFS drive are both refused. On a Windows PC:
 
-If the picker returns the file but the game cannot read it, the `broadFileSystemAccess` route
-isn't working on this console. Fallback: Device Portal → *File explorer* → *LocalAppData* →
-GT3 Revisited's `LocalState`, upload the `.iso` there, and pick it from there (the app always
-reaches its own folder). Then report it, with `gt3r.log`.
+1. Format the drive NTFS (Explorer → right-click → Format), or keep an NTFS drive as it is.
+2. In an administrator terminal: `icacls E:\ /grant "*S-1-15-2-1:(OI)(CI)RX" /T` (E: being the drive;
+   S-1-15-2-1 is ALL APPLICATION PACKAGES, RX read access), or Properties → Security → Edit → Add
+   "ALL APPLICATION PACKAGES" with Read & execute, applied to the files and folders below.
+3. Copy your `.iso` (about 3.9 GB) to it.
+
+Plug it into the console; if the Xbox asks how to use the drive, choose media, **not** game
+storage (that reformats it). At the first start the game asks for the disc; the picker shows the
+drive (usually E:). The path is remembered like on other platforms.
+
+Fallback: Device Portal → *File explorer* → *LocalAppData* → GT3 Revisited's `LocalState`,
+upload the `.iso` there, and pick it from there (the app always reaches its own folder).
 
 ## Where things are
 
