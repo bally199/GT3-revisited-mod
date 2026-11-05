@@ -20,6 +20,8 @@
 #include "sim/car_spec.h"
 #include "render/view3d.h"
 #include "vfs/vfs.h"
+#include "base/file.h"
+#include "formats/png_writer.h"
 
 #include <SDL3/SDL_timer.h>
 
@@ -151,6 +153,62 @@ public:
     }
 
 private:
+    // Diagnostics (the Xbox's car pages):
+    // GT3R_CAPTURE2D=<first>,<count>,<path>: the 2D steps of the car page's compositing as PNGs,
+    // read back from the 2D renderer's targets (<path>-<frame>-<step>.png), for frames
+    // first..first+count-1 counted from the first showroom frame.
+    // GT3R_SHOWROOM=<bits>: 1 one pass (no jitter scratch target), 2 no floor mirror, 4 no W - B
+    // composite (the car over black copied onto the page).
+    struct Capture2D {
+        bool parsed = false;
+        int first = 0, count = 0, frames = 0, last = -1, bits = 0;
+        std::string path;
+    } cap2d_;
+    void diag_frame() {
+        if (!cap2d_.parsed) {
+            cap2d_.parsed = true;
+            if (const char* b = SDL_getenv("GT3R_SHOWROOM")) cap2d_.bits = std::atoi(b);
+            if (const char* e = SDL_getenv("GT3R_CAPTURE2D")) {
+                std::string v = e;
+                size_t a = v.find(','), c = a == std::string::npos ? a : v.find(',', a + 1);
+                if (c != std::string::npos) {
+                    cap2d_.first = std::atoi(v.substr(0, a).c_str());
+                    cap2d_.count = std::max(0, std::atoi(v.substr(a + 1, c - a - 1).c_str()));
+                    cap2d_.path = v.substr(c + 1);
+                    LOG_INFO("2D capture: car page frames %d..%d to %s", cap2d_.first,
+                             cap2d_.first + cap2d_.count - 1, cap2d_.path.c_str());
+                }
+            }
+            if (cap2d_.bits) LOG_INFO("Showroom switches %d", cap2d_.bits);
+        }
+        if (cap2d_.last != frame_) cap2d_.last = frame_, ++cap2d_.frames;
+    }
+    void snap(SDL_Renderer* r, const char* step) {
+        const int k = cap2d_.frames - 1 - cap2d_.first;
+        if (cap2d_.count <= 0 || k < 0 || k >= cap2d_.count) return;
+        SDL_Surface* s = SDL_RenderReadPixels(r, nullptr);
+        SDL_Surface* c = s ? SDL_ConvertSurface(s, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        if (!c) {
+            LOG_WARN("2D capture %s: %s", step, SDL_GetError());
+            if (s) SDL_DestroySurface(s);
+            return;
+        }
+        std::vector<u32> px(size_t(c->w) * size_t(c->h));
+        for (int y = 0; y < c->h; ++y)
+            std::memcpy(&px[size_t(y) * size_t(c->w)], static_cast<const u8*>(c->pixels) + size_t(y) * size_t(c->pitch),
+                        size_t(c->w) * 4);
+        u32 alpha_min = 0xFF;
+        for (u32& p : px) alpha_min = std::min(alpha_min, p >> 24), p |= 0xFF000000u;
+        std::string path = cap2d_.path;
+        const size_t dot = path.rfind('.');
+        const std::string suffix = "-" + std::to_string(k) + "-" + step;
+        path = dot == std::string::npos ? path + suffix : path.substr(0, dot) + suffix + path.substr(dot);
+        if (write_host_file(path, encode_png(u32(c->w), u32(c->h), px)))
+            LOG_INFO("2D capture saved: %s (%dx%d, lowest alpha %u)", path.c_str(), c->w, c->h, alpha_min);
+        SDL_DestroySurface(c);
+        SDL_DestroySurface(s);
+    }
+
     struct Loaded {
         std::unique_ptr<render::GpuModel> model;
         float bmin[3]{}, bmax[3]{};
@@ -208,6 +266,8 @@ private:
         // 3 renders a frame instead of 10. Each pass is its own small 3D render, submit and
         // composite, which a tile-based mobile GPU pays for in full (5 fps on a Galaxy A15).
         if (platform::is_mobile()) passes = 1;
+        diag_frame();
+        if (cap2d_.bits & 1) passes = 1;
         if (show_.key != entry) {
             show_ = Showroom{};
             show_.key = entry;
@@ -310,7 +370,8 @@ private:
             }
         };
         const int mirror_passes = passes <= 2 || fade < 0.8f ? 1 : 2;
-        if (entry.rfind("buycar:", 0) != 0) // car_render_buy draws no floor mirror
+        snap(r, "0page");
+        if (entry.rfind("buycar:", 0) != 0 && !(cap2d_.bits & 2)) // car_render_buy draws no floor mirror
         add_mirror(r, page, 0.65f * fade * std::clamp(reflect, 0.0f, 1.0f), [&](int w, int h) {
             render::DrawOptions o = showroom_options(cam, view, true, env, reflect);
             o.clear[0] = o.clear[1] = o.clear[2] = 0;
@@ -331,6 +392,7 @@ private:
                 v.draw(r, SDL_FRect{0, 0, float(w), float(h)}, view, pj, eye, {{m.model.get(), {}, 0}}, o);
             });
         }, fade);
+        snap(r, "5page");
     }
 
     // The prize car page (gt_mode §10.1): every candidate on the carousel at its place and
@@ -566,6 +628,7 @@ private:
         SDL_SetRenderTarget(r, t.black);
         paint(w, h);
         SDL_FlushRenderer(r);
+        snap(r, "1mirror");
         SDL_SetRenderTarget(r, prev);
         static const SDL_BlendMode kAdd = SDL_ComposeCustomBlendMode(
             SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD, SDL_BLENDFACTOR_ZERO,
@@ -595,7 +658,16 @@ private:
             SDL_FlushRenderer(r);
         };
         render_on(t.black, 0);
+        snap(r, "2black");
+        if (cap2d_.bits & 4) { // diagnostics: the car over black, copied
+            SDL_SetRenderTarget(r, prev);
+            SDL_SetTextureBlendMode(t.black, SDL_BLENDMODE_NONE);
+            SDL_RenderTexture(r, t.black, nullptr, &dst);
+            SDL_FlushRenderer(r);
+            return;
+        }
         render_on(t.white, 1);
+        snap(r, "3white");
         static const SDL_BlendMode kSub = SDL_ComposeCustomBlendMode(
             SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_REV_SUBTRACT, SDL_BLENDFACTOR_ZERO,
             SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD);
@@ -610,6 +682,7 @@ private:
             SDL_SetRenderDrawColor(r, 255, 255, 255, Uint8(std::clamp(1.0f - opacity, 0.0f, 1.0f) * 255 + 0.5f));
             SDL_RenderFillRect(r, nullptr);
         }
+        snap(r, "4w-b");
         SDL_SetRenderTarget(r, prev);
         SDL_SetTextureBlendMode(t.white, SDL_BLENDMODE_MOD);
         SDL_RenderTexture(r, t.white, nullptr, &dst);
