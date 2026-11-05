@@ -498,6 +498,11 @@ void InputManager::handle_event(const SDL_Event& e) {
         }
         break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+#if GT3R_UWP
+        // gt3r.log: each pad button as the game receives it (Xbox: checking what arrives).
+        LOG_INFO("Pad %u button %s", unsigned(e.gbutton.which),
+                 SDL_GetGamepadStringForButton(SDL_GamepadButton(e.gbutton.button)));
+#endif
         if (capturing_) {
             InputSource s{InputSource::Kind::PadButton, int(e.gbutton.button)};
             s.device = capture_tag(e.gbutton.which);
