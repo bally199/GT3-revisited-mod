@@ -399,12 +399,12 @@ View3D::~View3D() {
 }
 
 void View3D::release_target() {
-    for (SDL_Texture** w : {&wrapper_, &half_wrapper_}) {
+    for (SDL_Texture** w : {&wrapper_, &half_wrapper_, &present_wrapper_}) {
         if (*w) SDL_DestroyTexture(*w);
         *w = nullptr;
     }
     SDL_GPUDevice* dev = ctx_.device();
-    for (SDL_GPUTexture** t : {&color_, &msaa_, &depth_, &scene_, &last_, &snap_, &half_, &haze_src_, &dof_}) {
+    for (SDL_GPUTexture** t : {&color_, &msaa_, &depth_, &scene_, &last_, &snap_, &half_, &present_, &haze_src_, &dof_}) {
         if (*t) SDL_ReleaseGPUTexture(dev, *t);
         *t = nullptr;
     }
@@ -479,6 +479,32 @@ bool View3D::ensure_half(SDL_Renderer* renderer) {
         return false;
     }
     half_w_ = w, half_h_ = h;
+    return true;
+}
+
+// The picture's 1:1 copy for the 2D renderer (created on first use, the targets' size).
+bool View3D::ensure_present(SDL_Renderer* renderer) {
+    if (present_wrapper_) return true;
+    if (width_ <= 0 || height_ <= 0) return false;
+    SDL_GPUTextureCreateInfo ti{};
+    ti.type = SDL_GPU_TEXTURETYPE_2D;
+    ti.width = u32(width_), ti.height = u32(height_);
+    ti.layer_count_or_depth = 1;
+    ti.num_levels = 1;
+    ti.format = GpuContext::kColorFormat;
+    ti.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    ti.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    present_ = SDL_CreateGPUTexture(ctx_.device(), &ti);
+    if (!present_) {
+        LOG_WARN("3D picture copy %dx%d: %s", width_, height_, SDL_GetError());
+        return false;
+    }
+    present_wrapper_ = wrap_texture(renderer, present_, width_, height_);
+    if (!present_wrapper_) {
+        SDL_ReleaseGPUTexture(ctx_.device(), present_);
+        present_ = nullptr;
+        return false;
+    }
     return true;
 }
 
@@ -692,6 +718,21 @@ void View3D::draw(SDL_Renderer* renderer, const SDL_FRect& rect, const Mat4& vie
         SDL_BlitGPUTexture(cmd, &bi);
         shown = half_wrapper_, tw = half_w_, th = half_h_;
     }
+#if GT3R_UWP
+    // Xbox (OpenGL ES on ANGLE, Direct3D 11.0): the 2D renderer reading the 3D target itself showed
+    // stale and washed-out pictures (car select, the dealership: every 3D view below 200%), while
+    // a blit of it was always right (the halving above): it shows a 1:1 copy instead.
+    else if (ctx_.gles() && ensure_present(renderer)) {
+        SDL_GPUBlitInfo bi{};
+        bi.source.texture = color_, bi.source.w = u32(pw), bi.source.h = u32(ph);
+        bi.destination.texture = present_, bi.destination.w = u32(pw), bi.destination.h = u32(ph);
+        bi.load_op = SDL_GPU_LOADOP_DONT_CARE;
+        bi.filter = SDL_GPU_FILTER_NEAREST;
+        SDL_BlitGPUTexture(cmd, &bi);
+        SDL_SetTextureScaleMode(present_wrapper_, opt.nearest ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR);
+        shown = present_wrapper_;
+    }
+#endif
     SDL_SubmitGPUCommandBuffer(cmd);
     if (capture_.count > 0 && capture_.frame == capture_.first + capture_.count) write_capture();
 
