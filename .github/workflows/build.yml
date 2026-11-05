@@ -2,6 +2,8 @@ name: build
 
 on:
   push:
+    # The Xbox port's working branch is built on the PC it is tested from (docs/dev/XBOX.md).
+    branches-ignore: [xbox-uwp]
   pull_request:
   workflow_dispatch: # also builds the release packages
 
