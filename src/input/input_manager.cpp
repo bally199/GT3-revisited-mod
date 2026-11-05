@@ -467,6 +467,12 @@ std::string InputManager::describe(int player, const InputSource& src) const {
 void InputManager::handle_event(const SDL_Event& e) {
     switch (e.type) {
     case SDL_EVENT_JOYSTICK_ADDED:
+#if GT3R_UWP
+        { // gt3r.log: which pads the game sees (Xbox: none came through at first)
+            const char* name = SDL_GetJoystickNameForID(e.jdevice.which);
+            LOG_INFO("Controller connected: %s%s", name ? name : "?", SDL_IsGamepad(e.jdevice.which) ? " (gamepad)" : "");
+        }
+#endif
         add_device(e.jdevice.which);
         assign_devices();
         break;

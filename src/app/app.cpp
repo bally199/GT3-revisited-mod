@@ -86,6 +86,15 @@ bool App::init(int argc, char** argv) {
     // Silent switch, and other apps' music paused while the game plays. SDL's own default there
     // (Playback, mixed with others) played on with the switch on silent.
     SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "AVAudioSessionCategorySoloAmbient");
+#if GT3R_UWP
+    // Xbox: pads come only through Windows.Gaming.Input, which SDL 3 leaves off unless asked
+    // (desktop Windows has RAWINPUT and XInput instead). HIDAPI cannot reach the pads in a UWP app.
+    SDL_SetHint(SDL_HINT_JOYSTICK_WGI, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "0");
+    // B is also the system's Back: handled, it stays in the game (SDL sends AC_BACK, which App::event
+    // drops) instead of Windows taking the app back to Dev Home.
+    SDL_SetHint(SDL_HINT_WINRT_HANDLE_BACK_BUTTON, "1");
+#endif
 #ifdef SDL_PLATFORM_WINDOWS
     // Xbox pads through SDL's RAWINPUT driver, for their impulse triggers, unless [input] xbox_driver = xinput:
     // SDL takes it as it starts its joysticks, so it is read from the config here.
