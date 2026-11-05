@@ -563,7 +563,11 @@ private:
         static const float kJ4[4][2] = {{0.375f, 0.25f}, {0.125f, 0.75f}, {0.875f, 0.25f}, {0.625f, 0.75f}};
         static const float kJ6[6][2] = {{0.4646f, 0.4646f}, {0.1313f, 0.7979f}, {0.5353f, 0.8686f},
                                         {0.8686f, 0.5353f}, {0.7979f, 0.1313f}, {0.2020f, 0.2020f}};
-        const int passes = trophy ? 4 : 6;
+        int passes = trophy ? 4 : 6;
+#if GT3R_UWP
+        diag_frame();
+        if (!(cap2d_.bits & 8)) passes = 1; // as the car pages' showroom (Xbox: see showroom())
+#endif
         composite(
             r, area,
             [&](SDL_Texture* tex, int w, int h, float bg) {
