@@ -40,6 +40,7 @@ namespace {
     X(PFNGLACTIVETEXTUREPROC, glActiveTexture) \
     X(PFNGLATTACHSHADERPROC, glAttachShader) \
     X(PFNGLBINDBUFFERPROC, glBindBuffer) \
+    X(PFNGLBINDBUFFERBASEPROC, glBindBufferBase) \
     X(PFNGLBINDBUFFERRANGEPROC, glBindBufferRange) \
     X(PFNGLBINDFRAMEBUFFERPROC, glBindFramebuffer) \
     X(PFNGLBINDRENDERBUFFERPROC, glBindRenderbuffer) \
@@ -328,6 +329,13 @@ struct SDL_GPUDevice {
     void(GL_APIENTRYP draw_base_vertex)(GLenum mode, GLsizei count, GLenum type, const void* indices,
                                         GLsizei instances, GLint base_vertex) = nullptr;
     GLuint vao = 0, ubo = 0;
+    // Uniform data bound as ranges of `ubo` (glBindBufferRange at an offset), or, without
+    // (ubo_ranges false), copied into one small buffer per binding point before the draws that
+    // change it, bound whole. ANGLE on Direct3D 11.0 (the Xbox's level for apps, which lacks
+    // constant buffer offsets) emulates ranges, and its copies of them went stale: draws took
+    // other draws' uniforms (wheels with the sky's transform, white fades over whole screens).
+    bool ubo_ranges = true;
+    GLuint slot_ubo[2][kSlots] = {};
     GLuint scratch_read = 0, scratch_draw = 0; // frame buffers for resolves and copies
     std::map<std::pair<GLuint, GLuint>, GLuint> programs;
     // Render pass frame buffers: (colour object, colour layer, colour mip, depth object);
@@ -547,7 +555,8 @@ void set_cap(GLenum cap, bool on, int& cur) {
     cur = int(on);
 }
 
-void replay(SDL_GPUDevice* dev, const std::vector<DrawRec>& draws, GLsizei w, GLsizei h) {
+void replay(SDL_GPUDevice* dev, const std::vector<DrawRec>& draws, const std::vector<Uint8>& arena, GLsizei w,
+            GLsizei h) {
     ReplayState s;
     glBindVertexArray(dev->vao);
     for (const DrawRec& d : draws) {
@@ -609,8 +618,17 @@ void replay(SDL_GPUDevice* dev, const std::vector<DrawRec>& draws, GLsizei w, GL
             const Uint32 n = st == 0 ? p->vs_ubos : p->fs_ubos;
             for (Uint32 k = 0; k < n && k < kSlots; ++k) {
                 if (s.ubo_offset[st][k] == d.ubo_offset[st][k] && s.ubo_size[st][k] == d.ubo_size[st][k]) continue;
-                glBindBufferRange(GL_UNIFORM_BUFFER, (st == 0 ? 0 : kFragmentUboBase) + k, dev->ubo,
-                                  GLintptr(d.ubo_offset[st][k]), GLsizeiptr(d.ubo_size[st][k]));
+                const GLuint binding = (st == 0 ? 0 : kFragmentUboBase) + k;
+                if (dev->ubo_ranges) {
+                    glBindBufferRange(GL_UNIFORM_BUFFER, binding, dev->ubo, GLintptr(d.ubo_offset[st][k]),
+                                      GLsizeiptr(d.ubo_size[st][k]));
+                } else if (size_t(d.ubo_offset[st][k]) + d.ubo_size[st][k] <= arena.size()) {
+                    // New storage each time (no wait on the draws that read the old data).
+                    glBindBuffer(GL_UNIFORM_BUFFER, dev->slot_ubo[st][k]);
+                    glBufferData(GL_UNIFORM_BUFFER, GLsizeiptr(d.ubo_size[st][k]), arena.data() + d.ubo_offset[st][k],
+                                 GL_STREAM_DRAW);
+                    glBindBufferBase(GL_UNIFORM_BUFFER, binding, dev->slot_ubo[st][k]);
+                }
                 s.ubo_offset[st][k] = d.ubo_offset[st][k];
                 s.ubo_size[st][k] = d.ubo_size[st][k];
             }
@@ -695,10 +713,12 @@ void run_pass(SDL_GPURenderPass* pass) {
     }
 
     if (!pass->draws.empty()) {
-        glBindBuffer(GL_UNIFORM_BUFFER, dev->ubo);
-        glBufferData(GL_UNIFORM_BUFFER, GLsizeiptr(std::max<size_t>(cmd->arena.size(), 16)),
-                     cmd->arena.empty() ? nullptr : cmd->arena.data(), GL_STREAM_DRAW);
-        replay(dev, pass->draws, w, h);
+        if (dev->ubo_ranges) {
+            glBindBuffer(GL_UNIFORM_BUFFER, dev->ubo);
+            glBufferData(GL_UNIFORM_BUFFER, GLsizeiptr(std::max<size_t>(cmd->arena.size(), 16)),
+                         cmd->arena.empty() ? nullptr : cmd->arena.data(), GL_STREAM_DRAW);
+        }
+        replay(dev, pass->draws, cmd->arena, w, h);
     }
 
     // Multisample resolve into the resolve texture (a cube face, for cube resolves).
@@ -882,6 +902,11 @@ SDL_Renderer* gt3r_gl_CreateGPURenderer(SDL_GPUDevice* device, SDL_Window* windo
     if (device->aniso) glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &device->max_aniso);
     glGenVertexArrays(1, &device->vao);
     glGenBuffers(1, &device->ubo);
+#if GT3R_UWP
+    // Xbox: Direct3D 11.0, no constant buffer offsets (see ubo_ranges).
+    device->ubo_ranges = false;
+#endif
+    if (!device->ubo_ranges) glGenBuffers(2 * kSlots, &device->slot_ubo[0][0]);
     glGenFramebuffers(1, &device->scratch_read);
     glGenFramebuffers(1, &device->scratch_draw);
     const char* gpu = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
