@@ -305,3 +305,22 @@ index ef2335b..09ffd6f 100644
                          (w_right | r_right),
                          (w_right) ? 0 : FILE_SHARE_READ,
                          (must_exist | truncate | a_mode),
+diff --git a/src/thread/stdcpp/SDL_systhread.cpp b/src/thread/stdcpp/SDL_systhread.cpp
+index c718d23..2e7f419 100644
+--- a/src/thread/stdcpp/SDL_systhread.cpp
++++ b/src/thread/stdcpp/SDL_systhread.cpp
+@@ -36,7 +36,13 @@ extern "C" {
+ 
+ static void RunThread(void *args)
+ {
+-    SDL_RunThread((SDL_Thread *)args);
++    SDL_Thread *thread = (SDL_Thread *)args;
++    /* The other backends set this in SDL_SYS_CreateThread; without it SDL_GetThreadID() of every
++       SDL thread is 0, and code that checks whether it is running on a given thread (WASAPI's
++       management thread running its own tasks inline) waits for itself forever. Set here, by the
++       thread itself, before its function runs. */
++    thread->threadid = SDL_GetCurrentThreadID();
++    SDL_RunThread(thread);
+ }
+ 
+ extern "C"
