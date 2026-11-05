@@ -5,6 +5,8 @@
 #include "disc/core_image.h"
 #include "disc/chd_image.h"
 
+#include <SDL3/SDL_error.h>
+
 #include <algorithm>
 #include <cstdio>
 
@@ -41,8 +43,13 @@ std::string incomplete_image(u64 file_bytes, u64 volume_bytes) {
 
 std::unique_ptr<Disc> Disc::open(const std::string& path) {
     std::unique_ptr<Disc> disc(new Disc());
+    SDL_ClearError(); // so the reason below is this open's, not an older one
     auto file = File::open(path);
-    if (!file) throw FormatError("Could not open file: " + path);
+    if (!file) {
+        // The system's reason (access denied, not found) says what to fix: SDL's file error.
+        const char* why = SDL_GetError();
+        throw FormatError("Could not open file: " + path + (why && *why ? std::string(" (") + why + ")" : std::string()));
+    }
     // By content: a picked file's path (an Android content:// URI) often has no extension.
     if (ChdImage::is_chd(*file)) disc->file_ = ChdImage::open(std::move(file));
     else disc->file_ = std::move(file);
