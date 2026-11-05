@@ -239,7 +239,7 @@ index 3ef3cb2..a19561d 100644
          return SDL_SetError("Failed to query WASAPI client interface");
      }
 diff --git a/src/core/winrt/SDL_winrtapp_direct3d.cpp b/src/core/winrt/SDL_winrtapp_direct3d.cpp
-index 5b8817c..0bdffb8 100644
+index 5b8817c..3be231c 100644
 --- a/src/core/winrt/SDL_winrtapp_direct3d.cpp
 +++ b/src/core/winrt/SDL_winrtapp_direct3d.cpp
 @@ -257,6 +257,11 @@ void SDL_WinRTApp::SetWindow(CoreWindow ^ window)
@@ -254,6 +254,18 @@ index 5b8817c..0bdffb8 100644
      window->SizeChanged +=
          ref new TypedEventHandler<CoreWindow ^, WindowSizeChangedEventArgs ^>(this, &SDL_WinRTApp::OnWindowSizeChanged);
  
+@@ -792,8 +797,9 @@ void SDL_WinRTApp::OnCharacterReceived(Windows::UI::Core::CoreWindow ^ sender, W
+ template <typename BackButtonEventArgs>
+ static void WINRT_OnBackButtonPressed(BackButtonEventArgs ^ args)
+ {
+-    SDL_SendKeyboardKey(0, SDL_GLOBAL_KEYBOARD_ID, 0, SDL_SCANCODE_AC_BACK, 0);
+-    SDL_SendKeyboardKey(0, SDL_GLOBAL_KEYBOARD_ID, 0, SDL_SCANCODE_AC_BACK, 1);
++    // A press, then its release (SDL 3 takes "down": 0 then 1 released first and left it down).
++    SDL_SendKeyboardKey(0, SDL_GLOBAL_KEYBOARD_ID, 0, SDL_SCANCODE_AC_BACK, true);
++    SDL_SendKeyboardKey(0, SDL_GLOBAL_KEYBOARD_ID, 0, SDL_SCANCODE_AC_BACK, false);
+ 
+     if (SDL_GetHintBoolean(SDL_HINT_WINRT_HANDLE_BACK_BUTTON, false)) {
+         args->Handled = true;
 diff --git a/src/filesystem/windows/SDL_sysfsops.c b/src/filesystem/windows/SDL_sysfsops.c
 index f0fc0fd..2f09bc6 100644
 --- a/src/filesystem/windows/SDL_sysfsops.c
@@ -324,3 +336,46 @@ index c718d23..2e7f419 100644
  }
  
  extern "C"
+diff --git a/src/video/winrt/SDL_winrtkeyboard.cpp b/src/video/winrt/SDL_winrtkeyboard.cpp
+index 9b86020..d5f1cc6 100644
+--- a/src/video/winrt/SDL_winrtkeyboard.cpp
++++ b/src/video/winrt/SDL_winrtkeyboard.cpp
+@@ -62,25 +62,33 @@ void WINRT_ProcessAcceleratorKeyActivated(Windows::UI::Core::AcceleratorKeyEvent
+ {
+     using namespace Windows::UI::Core;
+ 
+-    Uint8 state;
++    bool down;
+     SDL_Scancode code;
+     Uint16 rawcode = 0;
+ 
+     switch (args->EventType) {
+     case CoreAcceleratorKeyEventType::SystemKeyDown:
+     case CoreAcceleratorKeyEventType::KeyDown:
+-        state = 0;
+-        break;
++        down = true; // (was 0: SDL 3 takes "down", SDL 2's state was SDL_PRESSED = 1; presses and
++        break;       // releases came out swapped and a released key stayed down)
+     case CoreAcceleratorKeyEventType::SystemKeyUp:
+     case CoreAcceleratorKeyEventType::KeyUp:
+-        state = 1;
++        down = false;
+         break;
+     default:
+         return;
+     }
+ 
++    /* Game pads also arrive as keys (Xbox: GamepadA..GamepadRightThumbstickLeft, 195-218, and
++       the Navigation keys, 136-143), some with a keyboard's scan code (B as Escape). The pads
++       come through the joystick drivers; as keys they would press keyboard keys too. */
++    const int vk = (int)args->VirtualKey;
++    if ((vk >= 136 && vk <= 143) || (vk >= 195 && vk <= 218)) {
++        return;
++    }
++
+     code = WINRT_TranslateKeycode(args->VirtualKey, args->KeyStatus, &rawcode);
+-    SDL_SendKeyboardKey(0, SDL_DEFAULT_KEYBOARD_ID, rawcode, code, state);
++    SDL_SendKeyboardKey(0, SDL_DEFAULT_KEYBOARD_ID, rawcode, code, down);
+ }
+ 
+ void WINRT_ProcessCharacterReceivedEvent(SDL_Window *window, Windows::UI::Core::CharacterReceivedEventArgs ^ args)
