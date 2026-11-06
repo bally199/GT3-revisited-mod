@@ -346,7 +346,7 @@ struct SDL_GPUDevice {
         int w, h, draws; // draws -1: a blit
         bool msaa;
     };
-    bool timing = false, timing_log = false;
+    bool timing = false, timing_log = false, timing_log_checked = false;
     std::vector<GLuint> free_queries;
     std::vector<PassTime> frame_times;
     std::deque<std::vector<PassTime>> pending_times;
@@ -734,6 +734,12 @@ void time_end(SDL_GPUDevice* dev, GLuint q, int w, int h, int draws, bool msaa) 
 // After a present: the frame's queries go in line; the frames whose queries are all in summed.
 void time_frame(SDL_GPUDevice* dev) {
     if (!dev->timing) return;
+    if (!dev->timing_log_checked) { // (args.txt's --env pairs are set after the device opens)
+        dev->timing_log_checked = true;
+        const char* e = SDL_getenv("GT3R_GPU_TIMES");
+        dev->timing_log = e && *e && *e != '0';
+        if (dev->timing_log) LOG_INFO("OpenGL ES: GPU times logged");
+    }
     dev->pending_times.push_back(std::move(dev->frame_times));
     dev->frame_times.clear();
     while (!dev->pending_times.empty()) {
@@ -1057,8 +1063,7 @@ SDL_Renderer* gt3r_gl_CreateGPURenderer(SDL_GPUDevice* device, SDL_Window* windo
     if (!device->ubo_ranges) glGenBuffers(2 * kSlots, &device->slot_ubo[0][0]);
 #if GT3R_UWP
     device->timing = has_extension("GL_EXT_disjoint_timer_query");
-    if (const char* e = SDL_getenv("GT3R_GPU_TIMES")) device->timing_log = device->timing && *e && *e != '0';
-    LOG_INFO("OpenGL ES: GPU timing %s", device->timing ? (device->timing_log ? "on, logged" : "on") : "unavailable");
+    LOG_INFO("OpenGL ES: GPU timing %s", device->timing ? "on" : "unavailable");
 #endif
     glGenFramebuffers(1, &device->scratch_read);
     glGenFramebuffers(1, &device->scratch_draw);
