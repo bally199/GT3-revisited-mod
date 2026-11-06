@@ -37,6 +37,11 @@ SDL_GPUDevice* create_device(bool debug, bool angle);
 bool active();
 // True when the device in use asked for ANGLE (create_device).
 bool angle();
+// After presenting a frame: waits until the GPU has finished the frame before it, then marks
+// this one; returns the milliseconds waited. Keeps one frame in flight, and makes the wait for
+// a GPU that is behind happen here, measured with the present (dynamic resolution), instead of
+// in whichever later call the driver blocks (ANGLE on the Xbox: in the next frame's drawing).
+double frame_fence();
 // Draws without glDrawElementsInstancedBaseVertex from now on (GpuOptions::base_vertex).
 void disable_base_vertex();
 // Diagnostic probes: SDL_GPUDevice::probe in gpu_gles.cpp ([video] gles_probe, GT3R_GLES_PROBE).

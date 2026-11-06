@@ -76,6 +76,9 @@ namespace {
     X(PFNGLENABLEPROC, glEnable) \
     X(PFNGLENABLEVERTEXATTRIBARRAYPROC, glEnableVertexAttribArray) \
     X(PFNGLFINISHPROC, glFinish) \
+    X(PFNGLFENCESYNCPROC, glFenceSync) \
+    X(PFNGLCLIENTWAITSYNCPROC, glClientWaitSync) \
+    X(PFNGLDELETESYNCPROC, glDeleteSync) \
     X(PFNGLFRAMEBUFFERRENDERBUFFERPROC, glFramebufferRenderbuffer) \
     X(PFNGLFRAMEBUFFERTEXTURE2DPROC, glFramebufferTexture2D) \
     X(PFNGLFRONTFACEPROC, glFrontFace) \
@@ -323,6 +326,8 @@ struct SDL_GPUDevice {
     // nudged off exact 0 / 1 (the same stored values, but no metadata-only fast clear), 2 =
     // glFinish after every pass and blit (no GPU-side reordering). For the Xbox's car select.
     int probe = 0;
+    // frame_fence(): the last presented frame's fence (gone with the context).
+    GLsync frame_sync = nullptr;
     std::string description;          // gles::description()
     GLint ubo_align = 256;
     bool aniso = false;
@@ -786,6 +791,20 @@ void set_probe(int bits) {
     g_device->probe = bits;
     if (bits) LOG_INFO("OpenGL ES: probes %d (clears off 0 / 1: %s, finish after passes: %s)", bits,
                        bits & 1 ? "on" : "off", bits & 2 ? "on" : "off");
+}
+
+double frame_fence() {
+    if (!g_device || !g_device->renderer) return 0;
+    begin_gl(g_device);
+    double waited = 0;
+    if (g_device->frame_sync) {
+        const Uint64 t0 = SDL_GetTicksNS();
+        glClientWaitSync(g_device->frame_sync, GL_SYNC_FLUSH_COMMANDS_BIT, 100'000'000ull); // at most 0.1 s
+        waited = double(SDL_GetTicksNS() - t0) / 1e6;
+        glDeleteSync(g_device->frame_sync);
+    }
+    g_device->frame_sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    return waited;
 }
 
 void disable_base_vertex() {
