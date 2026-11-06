@@ -599,7 +599,7 @@ void RaceScreen::update_drive(App& app, double dt) {
         camera2_.set_track_distance(track_->distance_of(render_state2_.position));
         camera2_.set_lap(field_->second_laps().laps);
         camera2_.update(render_state2_, field_->second_setup(), pad2, dt);
-        app.input().set_rumble(1, rumble2_on_ && !replaying_
+        app.input().set_rumble(1, rumble2_on_ && !replaying_ && !attract_
                                       ? rumble2_.rumble(app.input().gt3_rumble(1), app.input().dualsense(1))
                                       : PadRumble{});
         if (se_on() && engine2_.loaded()) {
@@ -648,7 +648,8 @@ void RaceScreen::update_drive(App& app, double dt) {
     update_shot_filter();
     if (const float d = director_.take_dissolve(); d > 0) start_dissolve(d); // a course record's own
 
-    bool feel = rumble_on_ && !replaying_ && !demo_;
+    // Nobody drives in replays, demonstrations or the attract demo (its "player" car is the AI's).
+    bool feel = rumble_on_ && !replaying_ && !demo_ && !attract_;
     app.input().set_rumble(0, feel ? rumble_.rumble(app.input().gt3_rumble(0), app.input().dualsense(0)) : PadRumble{});
     if (const RaceField* f = exact_field(); f && f->opponents() > 0) {
         std::vector<const sim::VehicleState*> st;
@@ -686,7 +687,7 @@ void RaceScreen::update_drive(App& app, double dt) {
     }
     update_course_ambience(app);
     // Controller force feedback (triggers, wheels) while someone is driving.
-    if (!replaying_ && !demo_ && rumble_on_) {
+    if (!replaying_ && !demo_ && !attract_ && rumble_on_) {
         if (!finished_)
             if (const sim::VehicleTelemetry* t = vehicle_->telemetry())
                 app.input().set_force_feedback(0,
