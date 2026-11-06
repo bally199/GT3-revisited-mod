@@ -22,12 +22,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <string>
 #include <tuple>
 #include <vector>
 
 #ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
+#ifndef GL_TIME_ELAPSED_EXT // GL_EXT_disjoint_timer_query
+#define GL_TIME_ELAPSED_EXT 0x88BF
+#define GL_GPU_DISJOINT_EXT 0x8FBB
+#endif
 #define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
 #define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
 #endif
@@ -77,6 +82,10 @@ namespace {
     X(PFNGLENABLEVERTEXATTRIBARRAYPROC, glEnableVertexAttribArray) \
     X(PFNGLFINISHPROC, glFinish) \
     X(PFNGLFENCESYNCPROC, glFenceSync) \
+    X(PFNGLGENQUERIESPROC, glGenQueries) \
+    X(PFNGLBEGINQUERYPROC, glBeginQuery) \
+    X(PFNGLENDQUERYPROC, glEndQuery) \
+    X(PFNGLGETQUERYOBJECTUIVPROC, glGetQueryObjectuiv) \
     X(PFNGLCLIENTWAITSYNCPROC, glClientWaitSync) \
     X(PFNGLDELETESYNCPROC, glDeleteSync) \
     X(PFNGLFRAMEBUFFERRENDERBUFFERPROC, glFramebufferRenderbuffer) \
@@ -328,6 +337,23 @@ struct SDL_GPUDevice {
     int probe = 0;
     // frame_fence(): the last presented frame's fence (gone with the context).
     GLsync frame_sync = nullptr;
+    // GPU time of each pass and blit (GL_EXT_disjoint_timer_query, Xbox): a time-elapsed query
+    // around each, the frame's summed when all are in (a few frames later). Around the passes, not
+    // the whole frame: a query's span counts the GPU's idle time too, which within a pass (its
+    // commands go in together) is little. gpu_ms(); GT3R_GPU_TIMES=1 also logs them.
+    struct PassTime {
+        GLuint query;
+        int w, h, draws; // draws -1: a blit
+        bool msaa;
+    };
+    bool timing = false, timing_log = false;
+    std::vector<GLuint> free_queries;
+    std::vector<PassTime> frame_times;
+    std::deque<std::vector<PassTime>> pending_times;
+    double gpu_ms = -1;
+    int log_frames = 0;
+    double log_total = 0;
+    std::map<std::string, std::pair<double, double>> log_passes; // key -> ms, draws (summed)
     std::string description;          // gles::description()
     GLint ubo_align = 256;
     bool aniso = false;
@@ -690,6 +716,75 @@ void restore_defaults() {
     glUseProgram(0);
 }
 
+GLuint time_begin(SDL_GPUDevice* dev) {
+    if (!dev->timing || dev->pending_times.size() > 6) return 0;
+    GLuint q = 0;
+    if (!dev->free_queries.empty()) q = dev->free_queries.back(), dev->free_queries.pop_back();
+    else glGenQueries(1, &q);
+    if (q) glBeginQuery(GL_TIME_ELAPSED_EXT, q);
+    return q;
+}
+
+void time_end(SDL_GPUDevice* dev, GLuint q, int w, int h, int draws, bool msaa) {
+    if (!q) return;
+    glEndQuery(GL_TIME_ELAPSED_EXT);
+    dev->frame_times.push_back({q, w, h, draws, msaa});
+}
+
+// After a present: the frame's queries go in line; the frames whose queries are all in summed.
+void time_frame(SDL_GPUDevice* dev) {
+    if (!dev->timing) return;
+    dev->pending_times.push_back(std::move(dev->frame_times));
+    dev->frame_times.clear();
+    while (!dev->pending_times.empty()) {
+        std::vector<SDL_GPUDevice::PassTime>& f = dev->pending_times.front();
+        if (!f.empty()) {
+            GLuint ready = 0;
+            glGetQueryObjectuiv(f.back().query, GL_QUERY_RESULT_AVAILABLE, &ready);
+            if (!ready) break;
+        }
+        GLint disjoint = 0;
+        glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
+        double total = 0;
+        int k = 0;
+        for (const SDL_GPUDevice::PassTime& p : f) {
+            GLuint ns = 0;
+            glGetQueryObjectuiv(p.query, GL_QUERY_RESULT, &ns);
+            const double ms = double(ns) / 1e6;
+            total += ms;
+            if (dev->timing_log && !disjoint) {
+                char key[64];
+                SDL_snprintf(key, sizeof key, "#%02d %dx%d%s%s", k, p.w, p.h, p.msaa ? " msaa" : "",
+                             p.draws < 0 ? " blit" : "");
+                auto& e = dev->log_passes[key];
+                e.first += ms, e.second += std::max(0, p.draws);
+            }
+            ++k;
+            dev->free_queries.push_back(p.query);
+        }
+        if (!disjoint) {
+            dev->gpu_ms = total;
+            if (dev->timing_log) {
+                dev->log_total += total;
+                if (++dev->log_frames == 180) {
+                    std::vector<std::pair<double, std::string>> top;
+                    for (const auto& [key, e] : dev->log_passes) {
+                        char line[128];
+                        SDL_snprintf(line, sizeof line, "%s %.0f draws %.2f ms", key.c_str(), e.second / 180.0, e.first / 180.0);
+                        top.push_back({e.first, line});
+                    }
+                    std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+                    std::string list;
+                    for (size_t i = 0; i < top.size() && i < 10; ++i) list += (i ? "; " : "") + top[i].second;
+                    LOG_INFO("GPU time: %.2f ms a frame (180 frames); passes by time: %s", dev->log_total / 180.0, list.c_str());
+                    dev->log_frames = 0, dev->log_total = 0, dev->log_passes.clear();
+                }
+            }
+        }
+        dev->pending_times.pop_front();
+    }
+}
+
 void run_pass(SDL_GPURenderPass* pass) {
     SDL_GPUCommandBuffer* cmd = pass->cmd;
     SDL_GPUDevice* dev = cmd->dev;
@@ -706,6 +801,7 @@ void run_pass(SDL_GPURenderPass* pass) {
     const GLsizei w = GLsizei(std::max<Uint32>(1, sized->info.width >> mip));
     const GLsizei h = GLsizei(std::max<Uint32>(1, sized->info.height >> mip));
     const GLuint fbo = pass_fbo(dev, ct, layer, mip, dt);
+    const GLuint timer = time_begin(dev);
     glViewport(0, 0, w, h);
     glDisable(GL_SCISSOR_TEST);
 
@@ -761,6 +857,7 @@ void run_pass(SDL_GPURenderPass* pass) {
     if (nd) glInvalidateFramebuffer(GL_FRAMEBUFFER, nd, discard);
 #endif
 
+    time_end(dev, timer, int(w), int(h), int(pass->draws.size()), sized->info.sample_count != SDL_GPU_SAMPLECOUNT_1);
     restore_defaults();
     glBindFramebuffer(GL_FRAMEBUFFER, GLuint(saved_fb));
     if (dev->probe & 2) glFinish();
@@ -793,9 +890,12 @@ void set_probe(int bits) {
                        bits & 1 ? "on" : "off", bits & 2 ? "on" : "off");
 }
 
+double gpu_ms() { return g_device ? g_device->gpu_ms : -1; }
+
 double frame_fence() {
     if (!g_device || !g_device->renderer) return 0;
     begin_gl(g_device);
+    time_frame(g_device);
     double waited = 0;
     if (g_device->frame_sync) {
         const Uint64 t0 = SDL_GetTicksNS();
@@ -955,6 +1055,11 @@ SDL_Renderer* gt3r_gl_CreateGPURenderer(SDL_GPUDevice* device, SDL_Window* windo
     device->ubo_ranges = false;
 #endif
     if (!device->ubo_ranges) glGenBuffers(2 * kSlots, &device->slot_ubo[0][0]);
+#if GT3R_UWP
+    device->timing = has_extension("GL_EXT_disjoint_timer_query");
+    if (const char* e = SDL_getenv("GT3R_GPU_TIMES")) device->timing_log = device->timing && *e && *e != '0';
+    LOG_INFO("OpenGL ES: GPU timing %s", device->timing ? (device->timing_log ? "on, logged" : "on") : "unavailable");
+#endif
     glGenFramebuffers(1, &device->scratch_read);
     glGenFramebuffers(1, &device->scratch_draw);
     const char* gpu = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
@@ -1432,6 +1537,7 @@ void gt3r_gl_BlitGPUTexture(SDL_GPUCommandBuffer* cmd, const SDL_GPUBlitInfo* in
     SDL_GPUDevice* dev = cmd->dev;
     begin_gl(dev);
     const GLint saved = current_framebuffer();
+    const GLuint timer = time_begin(dev);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, dev->scratch_read);
     attach(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, src.texture, src.layer_or_depth_plane, src.mip_level);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dev->scratch_draw);
@@ -1439,6 +1545,7 @@ void gt3r_gl_BlitGPUTexture(SDL_GPUCommandBuffer* cmd, const SDL_GPUBlitInfo* in
     glBlitFramebuffer(GLint(src.x), GLint(src.y), GLint(src.x + src.w), GLint(src.y + src.h), GLint(dst.x),
                       GLint(dst.y), GLint(dst.x + dst.w), GLint(dst.y + dst.h), GL_COLOR_BUFFER_BIT,
                       info->filter == SDL_GPU_FILTER_LINEAR ? GL_LINEAR : GL_NEAREST);
+    time_end(dev, timer, int(dst.w), int(dst.h), -1, false);
     attach(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, nullptr, 0, 0);
     attach(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, nullptr, 0, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, GLuint(saved));

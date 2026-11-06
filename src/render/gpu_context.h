@@ -185,6 +185,8 @@ public:
 
     // After each presented frame: SDL has recycled the finished GPU work (see PendingGpuWork).
     void frame_presented();
+    // The GPU time of a recent frame's 3D passes in ms, where measured (the Xbox); else -1.
+    double gpu_frame_ms() const;
 
 private:
     GpuContext() = default;

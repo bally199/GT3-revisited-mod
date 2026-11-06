@@ -881,6 +881,12 @@ void InputManager::update(double dt) {
 }
 
 void InputManager::set_force_feedback(int player, const ForceFeedbackState& state) {
+#if GT3R_UWP
+    { // gt3r.log: who drives the pad's motors (vibration in replays)
+        static double last = -10;
+        if (time_ - last > 2.0) last = time_, LOG_INFO("Force feedback: player %d", player + 1);
+    }
+#endif
     players_[player].ffb = state;
     players_[player].ffb_age = 0;
 }
@@ -974,6 +980,12 @@ PadState merge_pads(const std::vector<PadState>& pads) {
 }
 
 void InputManager::set_rumble(int player, const PadRumble& r) {
+#if GT3R_UWP
+    if (r.large || r.small) { // gt3r.log: who drives the pad's motors (vibration in replays)
+        static double last = -10;
+        if (time_ - last > 2.0) last = time_, LOG_INFO("Rumble: player %d, %u / %u", player + 1, unsigned(r.large), unsigned(r.small));
+    }
+#endif
     Player& p = players_[player];
     p.rumble = r;
     const Device* d = find_device(p.device);

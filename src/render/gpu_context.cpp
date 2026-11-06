@@ -675,6 +675,13 @@ void note_gpu_submits(SDL_GPUDevice* device, u32 submits, u64 bytes) {
     if (pending_gpu_work().add(submits, bytes)) SDL_WaitForGPUIdle(device);
 }
 
+double GpuContext::gpu_frame_ms() const {
+#if GT3R_GLES
+    if (gles_ && gles::active()) return gles::gpu_ms();
+#endif
+    return -1;
+}
+
 void GpuContext::frame_presented() {
     pending_gpu_work().frame_presented();
 #if GT3R_UWP && GT3R_GLES

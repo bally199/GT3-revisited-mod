@@ -42,6 +42,9 @@ bool angle();
 // a GPU that is behind happen here, measured with the present (dynamic resolution), instead of
 // in whichever later call the driver blocks (ANGLE on the Xbox: in the next frame's drawing).
 double frame_fence();
+// The GPU time of the passes and blits of a recent frame, in ms (Xbox: time-elapsed queries,
+// read a few frames late); -1 when not measured.
+double gpu_ms();
 // Draws without glDrawElementsInstancedBaseVertex from now on (GpuOptions::base_vertex).
 void disable_base_vertex();
 // Diagnostic probes: SDL_GPUDevice::probe in gpu_gles.cpp ([video] gles_probe, GT3R_GLES_PROBE).

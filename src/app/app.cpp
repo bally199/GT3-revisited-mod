@@ -964,7 +964,15 @@ SDL_AppResult App::iterate() {
         return SDL_APP_FAILURE;
     }
     if (dyn_on_) {
-        float s = dyn_.frame(frame_s * 1000.0, present_ms);
+        double gpu_wait_ms = present_ms;
+#if GT3R_UWP
+        // Xbox (ANGLE): a GPU that is behind holds up the next frame's drawing, not the present,
+        // so the measured GPU time decides: a frame whose passes take 90% of the target or more
+        // counts as waiting on the GPU throughout.
+        if (const double g = gpu_ ? gpu_->gpu_frame_ms() : -1; g >= 0.9 * dyn_.target_ms())
+            gpu_wait_ms = std::max(gpu_wait_ms, frame_s * 1000.0);
+#endif
+        float s = dyn_.frame(frame_s * 1000.0, gpu_wait_ms);
         if (const double c = dyn_cycle_s(); c > 0) { // testing: down to 50% and back up every c seconds
             const double t = std::fmod(double(SDL_GetTicksNS()) / 1e9 / c, 1.0);
             const float top = dyn_.max_scale(), k = render::DynamicScale::kStep;
@@ -985,10 +993,11 @@ SDL_AppResult App::iterate() {
         if (thr > 0 && h_prev_end) {
             double wall = double(h_end - h_prev_end) / 1e6;
             if (wall > thr)
-                LOG_INFO("HITCH frame %llu: %.1f ms (pre %.1f, update %.1f [%d ticks %.1f], render %.1f [env %.1f collect %.1f draw %.1f], present %.1f) t=%.1f pos=(%.0f,%.0f) smoke=%d meshes=%d",
+                LOG_INFO("HITCH frame %llu: %.1f ms (pre %.1f, update %.1f [%d ticks %.1f], render %.1f [env %.1f collect %.1f draw %.1f], present %.1f) t=%.1f pos=(%.0f,%.0f) smoke=%d meshes=%d gpu=%.1f",
                          (unsigned long long)frame_, wall, double(h_u0 - h_prev_end) / 1e6, double(h_u1 - h_u0) / 1e6,
                          hitch::ticks, hitch::ticks_ms, double(h_r1 - h_r0) / 1e6, hitch::env_ms, hitch::collect_ms,
-                         hitch::draw_ms, double(h_end - h_r1) / 1e6, hitch::race_t, hitch::x, hitch::z, hitch::smoke, hitch::meshes);
+                         hitch::draw_ms, double(h_end - h_r1) / 1e6, hitch::race_t, hitch::x, hitch::z, hitch::smoke, hitch::meshes,
+                         gpu_ ? gpu_->gpu_frame_ms() : -1.0);
         }
         h_prev_end = h_end;
     }
