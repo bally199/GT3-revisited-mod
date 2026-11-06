@@ -91,6 +91,12 @@ public:
     // [video] limit_60fps = on: on high-refresh displays draw about 60 frames a second (the game
     // runs at 60 Hz); steadier when the computer is busy. Off (default): every display refresh.
     bool limit_60fps() const;
+    // [video] replay_30fps = on | off (default on on the Xbox, off elsewhere): replays,
+    // demonstrations and the attract demo drawn at 30 fps (vsync on every second 60 Hz refresh)
+    // while their screen calls request_half_rate() each frame.
+    bool replay_30fps() const;
+    void set_replay_30fps(bool on);
+    void request_half_rate() { half_request_ = true; }
     void set_limit_60fps(bool on);
     // [video] menu_shape = 4:3 (default) | stretch | ambient: the game's menu pictures between
     // bars, stretched across the game area, or between blurred sides (Ui::menu_picture).
@@ -297,6 +303,8 @@ private:
     static double dyn_cycle_s();
     // The main loop rate set by App::apply_frame_limit (0: as fast as vsync allows).
     double frame_limit_rate_ = 0;
+    bool half_request_ = false, half_rate_ = false; // request_half_rate(): this frame's ask; in force
+    void apply_half_rate();
     void apply_frame_limit();
     // [video] gamma, and its pass while it is not 1 (destroyed before gpu_).
     float gamma_ = 1.0f;

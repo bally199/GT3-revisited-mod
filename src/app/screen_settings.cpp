@@ -581,6 +581,10 @@ private:
                "On 120 Hz and faster displays, draw about 60 frames a second (the game runs at 60 Hz). "
                "Steadier when the computer is busy.",
                app.limit_60fps(), [a](bool v) { a->set_limit_60fps(v); });
+        toggle("Replays at 30 fps",
+               "Replays, demonstrations and the attract demo at 30 frames a second (with VSync): a steady "
+               "picture where their camera effects cost more than a race.",
+               app.replay_30fps(), [a](bool v) { a->set_replay_30fps(v); });
         toggle("FPS counter", "Show the frames drawn per second in a corner of the screen.", app.show_fps(),
                [a](bool v) { a->set_show_fps(v); });
 

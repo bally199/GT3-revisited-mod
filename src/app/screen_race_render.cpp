@@ -681,6 +681,7 @@ void RaceScreen::add_screen_passes(render::DrawOptions& o, const SDL_FRect& rect
 
 void RaceScreen::render_drive(App& app, Ui& ui) {
     app.note_race_scale();
+    if (replaying_ || attract_ || demo_) app.request_half_rate(); // [video] replay_30fps
     upload_course_animations(); // once per frame
     // The game area (App::aspect): 640 x 360 at 16:9, 480 x 360 at 4:3 (GT3's 4:3 picture),
     // the window's shape with fill.

@@ -25,7 +25,7 @@ std::optional<float> parse_render_scale(std::string_view value);
 constexpr int kMaxTargetSide = 16384;
 float supersample_limit(float pixel_w, float pixel_h);
 
-// Scale for "auto" given the window size in physical pixels.
+// Scale for "auto" given the window size in physical pixels (the Xbox: 1.5).
 float auto_render_scale(int pixel_w, int pixel_h, bool mobile);
 
 // With dynamic resolution and "auto", the most the 3D resolution goes up to: the screen's full

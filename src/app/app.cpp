@@ -567,6 +567,35 @@ void App::set_menu_shape(int shape) {
     save_config();
 }
 
+bool App::replay_30fps() const {
+#if GT3R_UWP
+    const char* fallback = "on";
+#else
+    const char* fallback = "off";
+#endif
+    return to_lower(config_.get("video", "replay_30fps").value_or(fallback)) == "on";
+}
+
+void App::set_replay_30fps(bool on) {
+    config_.set("video", "replay_30fps", on ? "on" : "off");
+    save_config();
+}
+
+// The vsync interval for request_half_rate(): every refresh, or as many refreshes as make 1/30 s.
+void App::apply_half_rate() {
+    const bool want = half_request_ && renderer_ && replay_30fps() && config_.get("video", "vsync").value_or("1") != "0";
+    if (want == half_rate_) return;
+    half_rate_ = want;
+    int interval = 1;
+    if (want) {
+        const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window_));
+        const double hz = mode && mode->refresh_rate > 0 ? mode->refresh_rate : 60.0;
+        interval = std::max(2, int(std::floor(hz / 30.0 + 0.25)));
+    }
+    if (SDL_SetRenderVSync(renderer_, interval)) LOG_INFO("Drawing on every %d refresh%s", interval, interval > 1 ? "es (30 fps)" : "");
+    else LOG_WARN("VSync interval %d: %s", interval, SDL_GetError());
+}
+
 bool App::limit_60fps() const { return to_lower(config_.get("video", "limit_60fps").value_or("off")) == "on"; }
 
 void App::set_limit_60fps(bool on) {
@@ -885,7 +914,9 @@ SDL_AppResult App::iterate() {
     begin_gamma_frame();
     ui_->clear();
     Uint64 h_r0 = SDL_GetTicksNS();
+    half_request_ = false;
     if (!screens_.empty()) screens_.back()->render(*this, *ui_);
+    apply_half_rate();
     updates().dialog_render(*ui_);
     Uint64 h_r1 = SDL_GetTicksNS();
     touch_.set_safe_area(safe_area_window());
@@ -963,7 +994,7 @@ SDL_AppResult App::iterate() {
                                  window_);
         return SDL_APP_FAILURE;
     }
-    if (dyn_on_) {
+    if (dyn_on_ && !half_rate_) { // (at 30 fps on purpose, frames are not late)
         double gpu_wait_ms = present_ms;
 #if GT3R_UWP
         // Xbox (ANGLE): a GPU that is behind holds up the next frame's drawing, not the present,

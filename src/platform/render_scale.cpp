@@ -26,6 +26,11 @@ float supersample_limit(float pixel_w, float pixel_h) {
 }
 
 float auto_render_scale(int pixel_w, int pixel_h, bool mobile) {
+#if GT3R_UWP
+    // Xbox (the app's screen is 1080p): 150%, which a Series S holds at 60 fps in races.
+    (void)pixel_w, (void)pixel_h, (void)mobile;
+    return 1.5f;
+#endif
     if (!mobile || pixel_w <= 0 || pixel_h <= 0) return 1.0f;
     // Height of the letterboxed 16:9 game area.
     float lines = std::min(float(pixel_h), float(pixel_w) * 9.0f / 16.0f);
