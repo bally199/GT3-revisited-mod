@@ -346,13 +346,34 @@ come from the donor's car file; the shadow is stretched to the car's size.
 |---|---|
 | Music (`.ads`) | Works now: replace tracks; the jukebox and the game pick them up. Titles, artists and the song markers that time the replays' Video-mode cuts still come from `bgm/ads.inf` (music §8); the Options music list previews the intro file `bgm/i_<file>` |
 | Textures in `.img` files | Works now (needs a Tex1 encoder; a PNG import tool is planned) |
+| HD texture packs (PNG) | Works now for the 3D models' textures (cars, courses): see below |
 | New cars (`cars/*.ini`) | Works now: data-only cars on a disc car's shell or their own glTF body, including electric ones, sold at GT Mode dealers, new makers included (see above) |
 | Any other file | Overrides are loaded wherever the game reads the file (menus, models, courses, sounds, databases, movies) |
 
+## HD texture packs
+
+The 3D models' textures (cars, courses, skies) can be replaced by PNGs of any
+size, matched by what the original texture looks like, so no PS2 formats are
+involved:
+
+1. Settings → Video → **Dump textures** on, then play: every texture as it
+   loads lands in `texture_dump/` in the data folder, named by its size and
+   contents (`256x128_0123456789abcdef.png`). Visit the courses and cars you
+   want covered; textures already dumped are not written again.
+2. Make your versions under the same names (an AI upscaler run over the folder
+   keeps them), at any size: twice or four times the original is usual.
+3. Put them in `textures/` in the data folder (folders inside it, two levels
+   deep, are read too; a later name wins). They are used from the next load of
+   each texture: start a race, or restart the game.
+
+Each replacement is decoded when its texture first loads, so a large pack
+lengthens loading, and it takes video memory at its own size (four times the
+size is sixteen times the memory). Textures the game rewrites as it runs (a few
+animated ones) keep their originals. The 2D menus, the HUD and the movies are
+not covered.
+
 ## Planned
 
-- **PNG texture replacement packs** keyed by decoded-texture hash, so
-  artists never have to touch PS2 formats.
 - **Data patches**: small text files that change individual database
   records (e.g. one car's power or price) instead of replacing whole
   databases, so several mods can combine.

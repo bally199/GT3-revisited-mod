@@ -256,6 +256,7 @@ bool App::init(int argc, char** argv) {
 #endif
     if (gpu_) {
         renderer_ = gpu_->renderer2d();
+        apply_texture_packs();
         // ~65 ms each on Mali, up to ~190 ms on a desktop driver without its shader cache: not mid-race
         gpu_->warm_pipelines();
         // macOS switches a fullscreen window between direct-to-display and composited now and
@@ -565,6 +566,16 @@ int App::menu_shape() const {
 void App::set_menu_shape(int shape) {
     config_.set("video", "menu_shape", shape == Ui::kMenuStretch ? "stretch" : shape == Ui::kMenuAmbient ? "ambient" : "4:3");
     save_config();
+}
+
+// [video] texture_dump = on: the models' textures into <data>/texture_dump/ as they load; HD
+// replacements from <data>/textures/ (docs/MODDING.md "Texture packs"), read from the next load
+// of each texture on (the folder is made, so it can be filled from outside, e.g. Device Portal).
+void App::apply_texture_packs() {
+    if (!gpu_) return;
+    const bool dump = to_lower(config_.get("video", "texture_dump").value_or("off")) == "on";
+    host_make_dir(data_dir_ + "textures");
+    gpu_->set_texture_packs(dump ? data_dir_ + "texture_dump" : std::string(), {data_dir_ + "textures"});
 }
 
 bool App::replay_30fps() const {

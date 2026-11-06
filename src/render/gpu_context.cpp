@@ -1,6 +1,9 @@
 #include "render/gpu_context.h"
 
+#include "base/file.h"
 #include "base/log.h"
+#include "formats/png_reader.h"
+#include "formats/png_writer.h"
 #include "platform/render_scale.h"
 #include "render/guard_band.h"
 #include "render/shaders/generated/model_clip_vert.h"
@@ -626,12 +629,66 @@ SDL_GPUTexture* GpuContext::acquire_texture(Uploader& up, u32 w, u32 h, const u3
         ++shared_textures_[it->second].holders;
         return it->second;
     }
-    SDL_GPUTexture* t = up.texture_rgba(w, h, rgba, true);
+    SDL_GPUTexture* t = nullptr;
+    if (!pack_dump_.empty() || !pack_files_.empty()) {
+        const std::string name = texture_pack_name(w, h, key.hash[0]);
+        if (!pack_dump_.empty() && pack_dumped_.insert(name).second) {
+            const std::string path = pack_dump_ + name + ".png";
+            if (!host_path_exists(path)) write_host_file(path, encode_png(w, h, std::vector<u32>(rgba, rgba + size_t(w) * h)));
+        }
+        if (auto it = pack_files_.find(name); it != pack_files_.end()) {
+            try {
+                if (std::optional<Bytes> file = read_host_file(it->second)) {
+                    const PngImage png = decode_png(*file);
+                    if (png.width && png.height && (t = up.texture_rgba(png.width, png.height, png.rgba.data(), true)))
+                        pack_replaced_.insert(t);
+                }
+            } catch (const std::exception& e) {
+                LOG_WARN("Texture pack: %s: %s", it->second.c_str(), e.what());
+            }
+            if (!t) LOG_WARN("Texture pack: %s not used", it->second.c_str());
+        }
+    }
+    if (!t) t = up.texture_rgba(w, h, rgba, true);
     if (t) {
         textures_by_key_[key] = t;
         shared_textures_[t] = {key, 1};
     }
     return t;
+}
+
+std::string GpuContext::texture_pack_name(u32 w, u32 h, u64 hash) {
+    char s[64];
+    std::snprintf(s, sizeof s, "%ux%u_%016llx", w, h, static_cast<unsigned long long>(hash));
+    return s;
+}
+
+void GpuContext::set_texture_packs(const std::string& dump_dir, const std::vector<std::string>& pack_dirs) {
+    auto slash = [](std::string d) {
+        if (!d.empty() && d.back() != '/' && d.back() != '\\') d += '/';
+        return d;
+    };
+    pack_dump_ = dump_dir.empty() ? std::string() : slash(dump_dir);
+    pack_dumped_.clear();
+    if (!pack_dump_.empty()) {
+        host_make_dir(pack_dump_);
+        LOG_INFO("Texture dump: new textures to %s", pack_dump_.c_str());
+    }
+    pack_files_.clear();
+    auto scan = [&](auto&& self, const std::string& dir, int depth) -> void {
+        for (const HostDirEntry& e : host_dir_entries(dir)) {
+            if (e.dir) {
+                if (depth < 2) self(self, dir + e.name + "/", depth + 1);
+                continue;
+            }
+            const size_t n = e.name.size();
+            if (n > 4 && (e.name.compare(n - 4, 4, ".png") == 0 || e.name.compare(n - 4, 4, ".PNG") == 0))
+                pack_files_[e.name.substr(0, n - 4)] = dir + e.name;
+        }
+    };
+    for (const std::string& d : pack_dirs)
+        if (!d.empty()) scan(scan, slash(d), 0);
+    if (!pack_files_.empty()) LOG_INFO("Texture packs: %zu replacement textures", pack_files_.size());
 }
 
 void GpuContext::release_texture(SDL_GPUTexture* t) {
@@ -642,10 +699,12 @@ void GpuContext::release_texture(SDL_GPUTexture* t) {
         textures_by_key_.erase(it->second.key);
         shared_textures_.erase(it);
     }
+    pack_replaced_.erase(t);
     SDL_ReleaseGPUTexture(device_, t);
 }
 
 bool GpuContext::take_texture(SDL_GPUTexture* t) {
+    if (pack_replaced_.count(t)) return false; // a pack's (its own size): the caller makes its own
     auto it = shared_textures_.find(t);
     if (it == shared_textures_.end()) return true;
     if (it->second.holders > 1) return false;

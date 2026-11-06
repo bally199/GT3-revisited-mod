@@ -95,6 +95,9 @@ public:
     // demonstrations and the attract demo drawn at 30 fps (vsync on every second 60 Hz refresh)
     // while their screen calls request_half_rate() each frame.
     bool replay_30fps() const;
+    // [video] texture_dump and <data>/textures/ (HD texture packs) to the 3D renderer; again after
+    // either changes (the textures already loaded keep theirs until reloaded).
+    void apply_texture_packs();
     void set_replay_30fps(bool on);
     void request_half_rate() { half_request_ = true; }
     void set_limit_60fps(bool on);

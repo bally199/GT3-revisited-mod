@@ -25,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -178,6 +179,12 @@ public:
     SDL_GPUTexture* acquire_texture(Uploader& up, u32 width, u32 height, const u32* rgba);
     // Drops a hold from acquire_texture; other textures are released outright.
     void release_texture(SDL_GPUTexture* texture);
+    // HD texture packs (docs/MODDING.md "Texture packs"): the textures acquire_texture makes,
+    // named by size and content ("256x128_0123456789abcdef"). A non-empty `dump_dir` gets each
+    // new one as <name>.png; a <name>.png in `pack_dirs` (or a folder in them, two levels down;
+    // later folders win) is uploaded in its place, at its own size.
+    void set_texture_packs(const std::string& dump_dir, const std::vector<std::string>& pack_dirs);
+    static std::string texture_pack_name(u32 width, u32 height, u64 hash);
     // Before rewriting a texture's texels: takes it out of the sharing when the caller is its
     // only holder (true; it is then the caller's own, released with release_texture as before).
     // False when others hold it too: the caller needs a texture of its own.
@@ -240,6 +247,10 @@ private:
     };
     std::map<TextureKey, SDL_GPUTexture*> textures_by_key_;
     std::map<SDL_GPUTexture*, SharedTexture> shared_textures_;
+    std::string pack_dump_;                        // set_texture_packs
+    std::set<std::string> pack_dumped_;            // names written (or found) in pack_dump_
+    std::map<std::string, std::string> pack_files_; // name -> PNG path
+    std::set<SDL_GPUTexture*> pack_replaced_;      // uploaded from a pack: never rewritten (take_texture)
 };
 
 // `texture` (w x h, GpuContext::kColorFormat) as a texture of the context's 2D renderer, drawn

@@ -722,6 +722,16 @@ private:
                    a->save_config();
                });
 
+        // [video] texture_dump = on | off (default off; App::apply_texture_packs)
+        toggle("Dump textures",
+               "Save every texture the game loads into the texture_dump folder of the data folder, for "
+               "making an HD texture pack (its PNGs, upscaled, go into the textures folder).",
+               to_lower(cfg.get("video", "texture_dump").value_or("off")) == "on", [a](bool v) {
+                   a->config().set("video", "texture_dump", v ? "on" : "off");
+                   a->save_config();
+                   a->apply_texture_packs();
+               });
+
         // [video] replay_look = on | off (default off; RaceScreen::apply_depth_of_field)
         toggle("Replay look while racing",
                "The replays' depth of field (focused on your car in the outside views) and, on the courses "
