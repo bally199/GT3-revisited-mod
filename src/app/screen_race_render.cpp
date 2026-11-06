@@ -9,7 +9,7 @@ namespace gt3r::race_screen {
 
 // The car reflection map (GT3 renders the course around the focus car into a 256x256
 // sphere map every frame; we render a cube): course only, 0.8 m above the player's car,
-// scenery within 200 m. [video] car_reflections = off falls back to the sky/scenery gradient.
+// scenery within 200 m. [video] car_reflections = off falls back to the sky/scenery gradient; half (the Xbox's default) redraws half the faces a frame.
 bool RaceScreen::update_env_cube() {
     if (!env_cube_on_ || !view_ || !course_scene_) return false;
     const sim::Vec3& p = render_state_.position;
@@ -49,7 +49,13 @@ bool RaceScreen::update_env_cube() {
         o.quantize_rgb5 = true;
         for (int i = 0; i < 3; ++i) o.clear[i] = 0;
     }
-    return view_->render_env_cube(pos, env_items_, o, 128) != nullptr;
+    unsigned faces = 0x3Fu;
+    if (env_half_) {
+        const sim::Vec3 d = p - env_last_pos_;
+        if (env_have_last_ && d.dot(d) < 25.0f) faces = (env_parity_ ^= 1) ? 0x07u : 0x38u; // within 5 m: half
+        env_last_pos_ = p, env_have_last_ = true;
+    }
+    return view_->render_env_cube(pos, env_items_, o, 128, faces) != nullptr;
 }
 
 // Rear-view mirror (onboard cameras; GT3: frame rect (200, 20) 240x64 with a 1 px black

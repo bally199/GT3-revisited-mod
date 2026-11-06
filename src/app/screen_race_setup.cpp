@@ -23,7 +23,15 @@ void RaceScreen::start(App& app, const Replay* replay) {
     lang_ = app.language();
     if (game::GtModeSession* gs = game::gt_mode_session()) imperial_ = gs->gt().data().units.mph;
     imperial_ = speed_unit().value_or(imperial_);
-    env_cube_on_ = app.config().get("video", "car_reflections").value_or("on") != "off";
+#if GT3R_UWP
+    const char* reflections = "half";
+#else
+    const char* reflections = "on";
+#endif
+    const std::string refl = to_lower(app.config().get("video", "car_reflections").value_or(reflections));
+    env_cube_on_ = refl != "off";
+    env_half_ = refl == "half";
+    env_have_last_ = false;
     if (SDL_getenv("GT3R_NO_ENV")) env_cube_on_ = false;
     shadows_on_ = app.config().get("video", "car_shadows").value_or("on") != "off";
     full_car_detail_ = app.full_car_detail();

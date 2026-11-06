@@ -353,6 +353,8 @@ struct SDL_GPUDevice {
     double gpu_ms = -1;
     int log_frames = 0;
     double log_total = 0;
+    Uint64 submit_ns = 0;  // CPU time in run_pass this frame (our GL calls, ANGLE's work for them)
+    double log_submit = 0; // its sum over the log's frames (ms)
     std::map<std::string, std::pair<double, double>> log_passes; // key -> ms, draws (summed)
     std::string description;          // gles::description()
     GLint ubo_align = 256;
@@ -742,6 +744,8 @@ void time_frame(SDL_GPUDevice* dev) {
     }
     dev->pending_times.push_back(std::move(dev->frame_times));
     dev->frame_times.clear();
+    dev->log_submit += double(dev->submit_ns) / 1e6;
+    dev->submit_ns = 0;
     while (!dev->pending_times.empty()) {
         std::vector<SDL_GPUDevice::PassTime>& f = dev->pending_times.front();
         if (!f.empty()) {
@@ -782,8 +786,9 @@ void time_frame(SDL_GPUDevice* dev) {
                     std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
                     std::string list;
                     for (size_t i = 0; i < top.size() && i < 10; ++i) list += (i ? "; " : "") + top[i].second;
-                    LOG_INFO("GPU time: %.2f ms a frame (180 frames); passes by time: %s", dev->log_total / 180.0, list.c_str());
-                    dev->log_frames = 0, dev->log_total = 0, dev->log_passes.clear();
+                    LOG_INFO("GPU time: %.2f ms a frame (180 frames; CPU in the passes' GL calls %.2f ms); passes by time: %s",
+                             dev->log_total / 180.0, dev->log_submit / 180.0, list.c_str());
+                    dev->log_frames = 0, dev->log_total = 0, dev->log_submit = 0, dev->log_passes.clear();
                 }
             }
         }
@@ -794,6 +799,7 @@ void time_frame(SDL_GPUDevice* dev) {
 void run_pass(SDL_GPURenderPass* pass) {
     SDL_GPUCommandBuffer* cmd = pass->cmd;
     SDL_GPUDevice* dev = cmd->dev;
+    const Uint64 cpu0 = dev->timing_log ? SDL_GetTicksNS() : 0;
     begin_gl(dev);
     check_gl(dev, "SDL's 2D renderer");
     const GLint saved_fb = current_framebuffer();
@@ -868,6 +874,7 @@ void run_pass(SDL_GPURenderPass* pass) {
     glBindFramebuffer(GL_FRAMEBUFFER, GLuint(saved_fb));
     if (dev->probe & 2) glFinish();
     check_gl(dev, "a render pass");
+    if (cpu0) dev->submit_ns += SDL_GetTicksNS() - cpu0;
 }
 
 } // namespace

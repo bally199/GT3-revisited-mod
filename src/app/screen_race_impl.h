@@ -715,6 +715,13 @@ private:
     mutable std::deque<WheelTrack> wheel_tracks_;
     WheelTrack ghost_wheel_track_;
     bool env_cube_on_ = true; // [video] car_reflections
+    // [video] car_reflections = half (the Xbox's default): half the map's six faces a frame,
+    // alternately, the whole map when the car jumped (a new race, a replay's cut back). Saves
+    // about 2 ms of the Xbox's CPU a frame; the map is then up to a frame older on one side.
+    bool env_half_ = false;
+    int env_parity_ = 0;
+    sim::Vec3 env_last_pos_{};
+    bool env_have_last_ = false;
     bool shadows_on_ = true;  // [video] car_shadows
     bool full_car_detail_ = false; // [video] full_car_detail (CarVisual::set_full_detail)
     bool showroom_wheels_ = false; // [video] showroom_wheels (read_showroom)
