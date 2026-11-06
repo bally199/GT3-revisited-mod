@@ -69,6 +69,7 @@ public:
     std::vector<Demo> demos;          // gcf section 12, attract mode
     std::vector<std::string> race_songs; // bgm/ads.inf race_* files ("race_a01.ads"), index order
     int title_idle_seconds = 20;      // gcf section 0, first word: title idle time before attract mode
+    int demo_time_limit_seconds = 0;  // gcf section 0, second word: an attract demo's time limit (0 = none)
     // Name entry page: item -> character, per language (menu/<lang>/name_entry1.pmb).
     std::map<std::string, std::map<std::string, std::string>> name_chars;
     // The characters of `lang`'s name entry page, else the region's own language's.
@@ -281,6 +282,9 @@ public:
     void remove_car(int index);
     // A fresh garage car with stock parts and settings (not added).
     std::optional<GarageCar> make_car(const std::string& car) const;
+    // Gives every car of a loaded save the goods it comes with: a save from an older version
+    // lacks those of its empty stock slots, so the car could not go back to stock.
+    void own_stock_goods(GameState& s) const;
 
     // --- Tune shop (always the ride car) ---------------------------------
     std::optional<PartOffer> part_offer(int goods) const;
@@ -539,7 +543,7 @@ private:
     int prize_paint(const PrizeCar& pc);   // paint index of a prize candidate (random when unset)
     int pick_prize(const PrizeSet& set);   // weighted candidate pick
     int add_prize_car_paint(const std::string& car, int paint, const std::string& origin);
-    void set_stock_ownership(GarageCar& c) const;
+    std::bitset<88> stock_ownership(const std::string& car) const; // the goods a car comes with
     void arcade_unlock_pass(ArcadeOutcome& out);
     bool fit(GarageCar& c, int goods) const;
     int place_in_garage(GarageCar c);

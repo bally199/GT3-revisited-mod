@@ -326,7 +326,7 @@ private:
     void tick(App& app, const PadState& pad);
     void update_drive(App& app, double dt);
     static ForceFeedbackState feedback(const sim::VehicleState& s, const sim::VehicleTelemetry& t, const sim::ControlInputs& in,
-                                       float wall, float car_hit, const RumbleModel& rumble);
+                                       float wall, float car_hit);
     void update_gear_hint(const sim::VehicleState& s);
     void update_dirt(double dt);
     void update_pylons(double dt);
@@ -753,6 +753,7 @@ private:
     std::vector<double> run_laps_; // the last live run's laps (the replays re-run lap_times_)
     bool abandoned_ = false;
     bool attract_ = false, attract_interrupted_ = false; // title-screen attract demo
+    bool race_preview_ = false; // GT Mode's Preview: an attract demo of the chosen event, endless, with the race songs
     bool theater_ = false;     // started by the Replay Theater (theater_replay / theater_demo / logger)
     // The Analyzer (data logger): the theater's (logger_mode_) or the quick menu's; its REPLAY's ghost (track B's lap).
     Analyzer analyzer_;
@@ -793,7 +794,8 @@ private:
     bool driver_view_ = false;
     int attract_car_frames_ = 0;
     std::string theater_demo_; // theater_demo: the demonstration's event code
-    static constexpr double kAttractSeconds = 1800.0 / 60.0; // Arcade demo's 1800-step timer
+    double attract_limit_s_ = 0; // the attract demo's time limit (GameRequest::time_limit_s, 0 = none)
+    static constexpr double kAttractFinishHold = 3.0; // seconds from car 0's last lap to the race's end
     float demo_start_kmh_ = 0;    // demo events: every car starts at this speed
     bool setting_pending_ = false;
     bool tt_failed_ = false;
@@ -802,6 +804,7 @@ private:
     bool no_course_fog_ = SDL_getenv("GT3R_NO_COURSE_FOG") != nullptr; // compare with the old linear fog
     bool no_far_plane_ = SDL_getenv("GT3R_NO_FAR_PLANE") != nullptr;    // compare without GT3's far plane
     bool dof_off_ = SDL_getenv("GT3R_NO_DOF") != nullptr; // compare without the replay depth of field
+    bool dof_pyramid_ = false; // [video] depth_of_field = standard (App::depth_of_field)
     bool heat_haze_ = false; // [video] heat_haze = on (default off): replays' heat haze lenses
     // [video] replay_look = on (default off): the replays' depth of field (focused on the car in the
     // outside views) and vignette while driving too.
@@ -842,6 +845,7 @@ private:
     bool practice_pit_exit_ = false;       // the player's car left the pit lane this step (START, count_s)
     int practice_pole_car_ = kNoPoleCar;   // the free practice's P.P. car (-1 the player, k opponent k; none before a lap)
     bool music_on_ = true, menu_music_on_ = true, rumble_on_ = true, rumble2_on_ = true;
+    bool wheel_force_on_ = true, wheel_force2_on_ = true; // the GT FORCE Force Feedback options
     bool aids_options_apply_ = false, asm_on_ = true, tcs_on_ = true;
     bool race_se_ = true, replay_se_ = true, ghost_on_ = true, wide_mode_ = false;
     QuickMenu quick_menu_;
@@ -961,6 +965,12 @@ private:
     u16 pad2_prev_ = 0;
     std::string race_event_;
     std::vector<std::string> race_opponents_;
+    // Quick race's custom race (GameRequest::opponent_paints / opponent_skills / no_rubber_band / laps / player_slot); a
+    // replay's paints.
+    std::vector<int> race_opponent_paints_;
+    std::vector<std::string> race_opponent_skills_;
+    bool race_no_rubber_band_ = false;
+    int race_chosen_laps_ = 0, race_player_slot_ = -1;
     bool field_grid_by_power_ = false; // the field's rules (recorded in replays)
     ReplayBattle battle_; // 2P battle: the field's set-up (recorded in replays)
     int race_laps_ = 0;

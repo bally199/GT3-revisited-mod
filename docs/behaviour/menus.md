@@ -628,9 +628,9 @@ frames: gray 0.1 (12.8 / 255) at alpha 1 − 0.5^(n − 10) after n frames
 follows (§11.1: the prize page, the name entry, the replay, the quick menu, or
 the menus) appears as a cut. The same transition runs over the last frame of
 every replay that goes back to a quick menu, at its end or on its pause
-EXIT, before the quick menu cuts in. EXIT from the pause menu of a Replay
-Theater run, an online run or the attract demo leaves at once, without the
-wash.
+EXIT, before the quick menu cuts in. It also runs when Start ends a Preview.
+EXIT from the pause menu of a Replay Theater run, an online run or the attract
+demo leaves at once, without the wash.
 
 Changes made with `open_control` are cuts. Most stay in the same control,
 such as entering the GT Mode map from the title (same `gt_mode` control) or
@@ -709,11 +709,13 @@ frames, on this disc (measured).
   configuration's demo list. Demos
   marked for the S license (the F1 demos) are skipped until the S license is
   held.
-- **When a demo ends on its own,** the next demo starts, up to five. After
-  the fifth, the opening movie `stream/opening.pss` plays, then the title.
-- **A demo that does not finish** (the player pressed a key) ends attract
-  mode and returns to the title. Starting a demo sets the title focus to
-  Arcade, so the title comes back on Arcade, also after the opening movie.
+- **A demo's time limit** comes from the same configuration and is 105 s on
+  every release. At the limit the next demo starts, up to five. After the
+  fifth, the opening movie `stream/opening.pss` plays, then the title.
+- **Any other end** finishes attract mode and returns to the title: a key, or
+  the race's own end 3 s after the followed car's last lap. The demos have 20
+  laps, so the limit always comes first. Starting a demo sets the title focus
+  to Arcade, so the title comes back on Arcade, also after the opening movie.
 
 ### §7.3 Music and movies per page
 
@@ -783,7 +785,13 @@ their entry's movie once the cursor rests (§9.1).
   `go_machine_test` (whose race code is the item name), `go_free_run` and
   `go_preview` raise a race request (§7.5). Afterwards the menus resume on the
   same page, except that a race entry page (a name ending in `_entry`)
-  resumes on its back page, the race list.
+  resumes on its back page, the race list. After `go_preview` the entry page
+  itself resumes, with PREVIEW focused.
+- **Preview.** `go_preview` is a race the computer drives: the event's own
+  cars from its pool, none of the player's, with the replay cameras, no HUD
+  and the game's mark. It has no laps or time limit, so it runs until Start
+  ends it; the other buttons act as in a replay. No day passes and the ride
+  car is not touched.
 - **Save pages.** `go_save_in_home` opens the save page (Save game) and
   returns to the home page. `go_trade` opens the save page as "Trade" to load
   a friend's garage, then shows its cars on `hm/hm_gr_trade`; leaving that
@@ -1142,7 +1150,8 @@ page opens and side-on (yaw 90°) after about 7.4 s.
   `compulsory`) to smooth its edges. GT3 Revisited draws one pass, and one
   reflection pass, on phones and tablets (Android, iOS:
   `platform::is_mobile`), where the 3D renderer's MSAA smooths the edges
-  instead.
+  instead, and everywhere when the car is drawn at the screen's resolution
+  (§15).
 - Menu cars are the detailed `menu/cars` models with `menu/wheel` rims. Each
   wheel shows the car's own brake disc and caliper through its spokes (the
   menu car's front and rear brake parts, mirrored on the right side;
@@ -1335,6 +1344,7 @@ plays its songs from (music §2.3). The playlist is stored in `config.ini` as
 `[options] music_playlist`. When none is stored, or the stored one is
 invalid, a new one is made and stored at once: every race song of
 `bgm/ads.inf` (25 on the disc) in the disc's order, all listed, Shuffle on.
+A list stored on another disc takes this disc's songs (ours, music §2.3).
 The top page's music preview (widget `song_list`) shows the same list without
 a cursor or previews.
 
@@ -1396,7 +1406,8 @@ above the list, in its art (a title box per tab, the chosen one focused), and
 the list's window is one Order / Shuffle row shorter under it: **Original**
 (the disc's playlist, as above), **Custom** (the player's songs, a playlist of
 the same kind) and **Both** (the disc's songs, then the player's; Order /
-Shuffle there is the mix's, music §2.3). At the row's right end are the last
+Shuffle there is the mix's, music §2.3). Until a tab is chosen the page opens
+on Custom. At the row's right end are the last
 row's Order and Shuffle buttons again, the same choice, so a long list doesn't
 put it out of reach. Up from the first song reaches the row; Left / Right move
 along it (SE `cursor`, `disable` at an end) and Confirm takes the tab (SE
@@ -2014,7 +2025,12 @@ The race quick menus play the same set through their own `MenuSounds`.
 game's menus.
 
 - **Picture.** It draws each 640 × 448 frame into a texture shown at 4:3 in
-  the middle of the window.
+  the middle of the window. With `[video] sharp_menu_models = on` (the
+  default; Settings → Display → Sharp cars and prizes in menus) GT3 Revisited
+  draws a page's 3D models at the screen's resolution between the page's art,
+  which stays a 640 × 448 picture scaled up under and over them. Phones and
+  tablets keep models with depth of field (license cards, trophies) in the
+  640 × 448 page.
 - **Frames.** It steps the flow in 60 Hz frames, plays the flow's SEs, music
   and movies, and starts transitions over the last frame.
 - **Gameplay.** It hands requests to the registered gameplay handler, and

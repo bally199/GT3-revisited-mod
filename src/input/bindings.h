@@ -221,6 +221,7 @@ struct PlayerBindings {
     const Profile& set(DeviceKind kind, bool race, BindingSet s) const;
     bool has_custom(DeviceKind kind, bool race) const; // custom sets kept (either set)
     bool custom(DeviceKind kind, bool race) const;     // and in use
+    bool controller_custom(DeviceKind kind, bool race) const; // the controller's set is custom and in use
     bool race_reads_menu(DeviceKind kind) const;        // "gt3", no custom race sets in use
     Profile combined(DeviceKind kind, bool race) const; // both sets: what drives the player
     // An edit: `source` goes into its own set (binding_set), alone there with `replace`; the
@@ -236,6 +237,9 @@ struct PlayerBindings {
     void reset(DeviceKind kind, bool race); // the layout chosen; custom sets kept
     void use_custom(bool race);             // the kept custom sets chosen again
     void set_race_layout(DeviceKind kind, std::string_view layout); // chosen; custom race sets kept
+    // A wheel set up as a joystick (is_wheel in input_manager.h: earlier versions took one SDL
+    // doesn't list for a joystick): with no sets of the wheel's yet, it gets the joystick's.
+    void adopt_joystick_sets();
 
     std::vector<std::string> devices() const; // device tags any of the sets use
     // [<sec>.bindings] / [<sec>.race] (the pad's), [<sec>.wheel.*], [<sec>.joystick.*] and
@@ -251,6 +255,7 @@ struct PlayerBindings {
 
 private:
     std::optional<Profile>& slot(DeviceKind kind, bool race, BindingSet s);
+    void drop_wheel_deadzones(); // the stick dead zone on the wheel's sets' axes
     void begin_custom(DeviceKind kind, bool race); // custom sets in use, made as they stand if not
 };
 

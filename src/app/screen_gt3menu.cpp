@@ -238,7 +238,7 @@ public:
         acc_ += dt;
         while (acc_ >= kFrame) {
             acc_ -= kFrame;
-            step(app, keys);
+            step(app, keys, acc_ < kFrame);
         }
     }
 
@@ -251,7 +251,7 @@ public:
         }
         draw_frame(app);
         // 4:3 picture in the middle of the game area (or as [video] menu_shape has it).
-        ui.menu_picture(frame_);
+        ui.menu_picture(frame_ ? canvas_.shown(frame_) : nullptr);
         // Our main menu (settings, mods, online, ...), in the bar beside the title menu.
         gt3r_button_ = {};
         if (on_title()) {
@@ -330,7 +330,8 @@ private:
                                                           float alpha) {
             if (flow_ && flow_->gt_active())
                 if (const GtModeWidgetDrawer& d = gt_mode_widget_drawer(); d && flow_->controller())
-                    d(app, r, e, box, alpha, flow_->controller()->page_name(), element_image(renderer_->drawing_scene(), e));
+                    d(app, r, e, box, alpha, flow_->controller()->page_name(), element_image(renderer_->drawing_scene(), e),
+                      &canvas_);
             // 2 Player car page: each player's car ("ar/select_car_2p:<entry>#paint@age%player");
             // player 2's draw comes one page width to the right.
             if (flow_ && flow_->control() == "arcade" && flow_->two_player(0) && e.name == "car") {
@@ -344,7 +345,7 @@ private:
                         d(app, r, e, b, alpha,
                           "ar/select_car_2p:" + t.cars[size_t(t.car)] + "#" + std::to_string(t.paint) + "@" +
                               std::to_string(t.age) + "%" + std::to_string(p),
-                          element_image(renderer_->drawing_scene(), e));
+                          element_image(renderer_->drawing_scene(), e), &canvas_);
                     }
                 }
                 return;
@@ -356,7 +357,7 @@ private:
                     d(app, r, e, box, alpha,
                       c.page + ":" + c.entries[size_t(c.index)] + "#" + std::to_string(flow_->car_paint()) + "@" +
                           std::to_string(c.age),
-                      element_image(renderer_->drawing_scene(), e));
+                      element_image(renderer_->drawing_scene(), e), &canvas_);
                 }
         });
         renderer_->set_widget_drawer([this, &app](SDL_Renderer* r, const Element& e, const SDL_FRect& box, float alpha) {
@@ -489,9 +490,10 @@ private:
         transition_.stop();
     }
 
-    // One 60 Hz frame of the menu, including its picture (transitions
-    // accumulate on the previous frame, so every frame is drawn).
-    void step(App& app, MenuKeys keys) {
+    // One 60 Hz frame of the menu, including its picture (transitions accumulate on the previous
+    // frame, so every frame counts). `draw` false: another tick follows at once, catching up on a
+    // slow frame: only the last picture shows, and a page's 3D passes would slow the next frame.
+    void step(App& app, MenuKeys keys, bool draw = true) {
         flow_->tick(keys);
         for (const std::string& s : flow_->take_sounds()) sounds_.play(app.audio().voices(), s);
         for (std::string& m : flow_->take_log()) messages_.push_back({std::move(m), 240});
@@ -530,7 +532,7 @@ private:
             acc_ = 0;
         }
         ++pending_draws_;
-        draw_frame(app);
+        if (draw) draw_frame(app);
     }
 
     // Options menu values ([options] in config.ini): Menu BGM / Menu SE apply at once.
@@ -574,7 +576,7 @@ private:
         // The race keeps this frame and its transition on screen while it loads (menus §6);
         // the slot is emptied again once the request has been handed on.
         menu::flow::LoadingPicture& loading = menu::flow::race_loading_picture();
-        loading.frame = frame_;
+        loading.frame = canvas_.shown(frame_);
         loading.transition = transition_;
         struct Clear {
             ~Clear() { menu::flow::race_loading_picture() = {}; }
@@ -612,20 +614,26 @@ private:
             if (movie_.finished()) start_movie(app, movie_path_); // loops
             movie_.update(r);
         }
+        const SDL_Point size = app.menu_model_size(); // (of the window: before the target changes)
         SDL_Texture* prev = SDL_GetRenderTarget(r);
-        SDL_SetRenderTarget(r, frame_);
-        const SDL_FRect full{0, 0, kMenuWidth, kMenuHeight};
         if (flow_->switching() || flow_->waiting_for_game()) {
             // Loading transition: drawn over the last menu picture, once per frame.
-            for (; pending_draws_ > 0; --pending_draws_) transition_.draw_frame(r, full);
+            SDL_Texture* picture = canvas_.shown(frame_);
+            float w = kMenuWidth, h = kMenuHeight;
+            SDL_GetTextureSize(picture, &w, &h);
+            SDL_SetRenderTarget(r, picture);
+            for (; pending_draws_ > 0; --pending_draws_) transition_.draw_frame(r, SDL_FRect{0, 0, w, h});
         } else {
             transition_.stop();
             pending_draws_ = 0;
+            SDL_SetRenderTarget(r, frame_);
+            canvas_.begin(r, frame_, size.x, size.y);
             SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
             SDL_RenderClear(r);
             RenderOptions ro;
             ro.widget_labels = false;
-            renderer_->draw_elements(flow_->draw_list(), ro, full);
+            renderer_->draw_elements(flow_->draw_list(), ro, SDL_FRect{0, 0, kMenuWidth, kMenuHeight});
+            canvas_.end(r);
         }
         SDL_SetRenderTarget(r, prev);
     }
@@ -689,6 +697,7 @@ private:
         return t;
     }
     SDL_Texture* frame_ = nullptr;
+    MenuCanvas canvas_;
     int pending_draws_ = 1;
     double acc_ = 0;
     MenuKeys prev_keys_ = 0;

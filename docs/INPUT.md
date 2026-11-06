@@ -34,7 +34,7 @@ generic HID joysticks, wheels and pedals. Devices hot-plug at any time.
 |---|---|
 | Rumble | DS2 large motor → low-frequency motor, small motor → high-frequency motor. In races, each player's **Rumble** (Settings → Rumble & feedback, `[playerN] rumble`) picks how the motors run: **GT3 original** (`gt3`) follows GT3's own vibration: each step's level (suspension movement, curbs under the front wheels, the front tires' drive and brake forces, wall hits) on the large motor as GT3 sends it (at most half strength), never the small motor; most controllers play its low levels much stronger than a DualShock 2, so it runs all the time there. **Modern** (`modern`) rumbles for what the car meets on both motors, so it is felt in both grips, with a lean: the body stronger on the large motor (the left grip), the tires on the small one (the right grip), the other motor at 35%, or 70% on a DualSense, whose motors play in separate grips where a split feels like a side. A wall or car hit pulses for 0.25 s by its speed change and off-road holds, leaning left; wheelspin, a slide (the tire squeal) and locked wheels hold, and curbs pulse at a rate that follows the speed, leaning right. **Auto** (`auto`, the default) is Modern on every controller. Either way, a car the AI drives, as after the finish, does not vibrate |
 | Phone vibration (Android, off by default) | `[player1] phone_vibration = on` (Settings → Rumble & feedback → Phone vibration): player 1's rumble on the device's own motor, only while the controls driving them have no rumble motor (built-in handheld controls, touch, a controller without motors). A controller that rumbles keeps it; the phone stays still |
-| Impulse triggers (Xbox One/Series) | See Force feedback: the ABS on the brake's trigger, the wheelspin on the throttle's. On Windows only through SDL's RAWINPUT driver (see Xbox controllers) |
+| Impulse triggers (Xbox One/Series) | See Force feedback: the ABS on the brake's trigger, the edge of grip on the throttle's. On Windows only through SDL's RAWINPUT driver (see Xbox controllers) |
 | Player LEDs / light bars | Set to the player number |
 | Button labels | The UI shows Cross/Circle on PlayStation pads and A/B on Xbox pads |
 | Motion sensors | `tilt` source: steer by rolling the controller (DualSense, DS4, Switch Pro, or a phone's own accelerometer on Android and iOS) |
@@ -48,8 +48,8 @@ controller`): **Auto** (`auto`), a connected pad or wheel by name (`controller`
 holds part of its name; one that isn't connected stays listed as "(not
 connected)"), or **Keyboard only** (`keyboard`; offered only when a keyboard
 is connected, never in VR builds). Left/Right changes it; Cross does nothing
-there. Auto takes a device SDL identifies as a wheel, otherwise the first free
-gamepad, otherwise any other joystick (SDL also lists flight sticks and some
+there. Auto takes a wheel SDL lists, then one known only by its forces,
+otherwise the first free gamepad, otherwise any other joystick (SDL also lists flight sticks and some
 keyboards, mice and macro pads as joysticks, so those never take a player's
 gamepad); Settings shows it as "Auto: <name>". A device chosen by name is used
 whatever its type.
@@ -59,7 +59,7 @@ The kind of device in use picks the buttons; players don't choose a layout:
 | Kind | Buttons |
 |---|---|
 | Gamepad | DualShock 2 layout 1:1 (triggers → L2/R2 pressure); back paddles → R2 / L2 (right up, left down: GT3's shift buttons) |
-| Wheel (a device SDL identifies as a wheel) | Axis 0 steering, axes 1/2 pedals (resting at +1); typical Logitech layout. Races use GT3's steering-wheel path |
+| Wheel (a device SDL identifies as a wheel, or a joystick SDL has no type for that plays a spring and a constant force, which rumble motors don't: SDL only lists the wheels it knows, and a Simucube 3 reaches the PC as its Link Hub, which isn't listed; issue 134) | Axis 0 steering, axes 1/2 pedals (resting at +1); typical Logitech layout. A `pedal` on an axis that has stayed in the middle since it connected reads as nothing there, not half way down (a Simucube's Y axis idles at the centre). Races use GT3's steering-wheel path. A wheel earlier versions took for a joystick gets the joystick's custom bindings, if it has no wheel bindings yet |
 | Joystick (any other device SDL doesn't map as a gamepad) | None: nothing is pressed until its inputs are bound in Settings → Controls (saved to `[playerN.joystick.*]`) |
 | Keyboard (Keyboard only, or no device connected) | Keyboard only |
 
@@ -78,9 +78,10 @@ screenshot.
 
 **Keyboard** (`keyboard = off`, hidden under Keyboard only) stops the keyboard
 also driving a player, except player 1 with buttons only the keyboard can
-drive (no device connected, or custom bindings with only keys): their keyboard
-stays live, so the game can't be left with no way to control it. Keyboard only
-always drives the player with the keyboard.
+drive (no device connected, custom bindings with only keys, or a wheel SDL
+doesn't list on the wheel layout, whose button numbers may not be that wheel's):
+their keyboard stays live, so the game can't be left with no way to control it.
+Keyboard only always drives the player with the keyboard.
 
 Configs from before the Controller choice used `preset` (`racing`, `classic`,
 `wheel`, `keyboard`) and `device`; they are read once: `racing` and `classic`
@@ -155,7 +156,8 @@ then:
   one way (bind it to Steer left / Steer right, Look left / Look right or Look
   back, or the D-pad). A stick captured on Steer or a stick axis gets
   `deadzone=0.08`; a wheel's axis gets none, and the wheel's saved sets drop the
-  `deadzone=0.08` earlier versions gave it (issue 134). An axis that rests at an
+  `deadzone=0.08` earlier versions gave it (issue 134). In races Steer's dead zone
+  is the **Steering dead zone** setting (see Race controls). An axis that rests at an
   end (a pedal, a joystick's trigger) captured on a button or a stick half reads
   over its whole travel (`pedal`, with `invert` when it rests at +1), not from
   half way; one resting in the middle (combined pedals) keeps its half.
@@ -238,6 +240,8 @@ race = modern          ; race layout (modern | gt3), used when there is no [play
 rumble = auto          ; race rumble: auto (modern) | modern | gt3 (see Native features)
 steering_curve = 1.00  ; race steering = |x|^curve, 0.5..2.5 (see Race controls)
 wheel_steering_curve = 1.00 ; the same for a wheel
+steering_deadzone = 0.08 ; race steering's dead zone, 0..0.3 (see Race controls)
+wheel_steering_deadzone = 0.00 ; the same for a wheel
 phone_vibration = off  ; Android, player 1 only: rumble on the device's own motor (see Native features)
 
 [player1.bindings]     ; the menu pad, a gamepad's inputs ([player1.wheel.bindings], [player1.joystick.bindings])
@@ -285,7 +289,7 @@ Circle Cross Square`, and the axes `LX LY RX RY`, optionally as halves
 
 | Option | Effect |
 |---|---|
-| `deadzone=0.1` | Inner deadzone, as a fraction of the range |
+| `deadzone=0.1` | Inner deadzone, as a fraction of the range (Steer in races: the Steering dead zone setting instead) |
 | `saturation=0.9` | Input level that already counts as full |
 | `curve=1.5` | Response exponent; >1 gives finer control near rest |
 | `scale=0.8` | Output multiplier |
@@ -378,6 +382,13 @@ centre (a wheel set to a small rotation); below 1 is quicker off it (a large
 rotation). Full lock stays at the end of the travel. The menus read the input as
 it is.
 
+**Steering dead zone** (Settings > Controls, per player: `[playerN]
+steering_deadzone`, and `wheel_steering_deadzone` while a wheel steers) is how far
+a stick or wheel axis on Steer moves off the centre before the race steers, as a
+fraction of its range (0..0.3; 0.08 for sticks, 0 for wheels: 36° of a 900° wheel's
+turn at 0.08, issue 134). In races it takes the place of those bindings' `deadzone`;
+the menus keep theirs.
+
 Replays, the pause window and the quick menus read the menu pad, as in GT3.
 Start opens the pause, in replays too. In a replay, Cross switches between the
 replay cameras and the view you drove with, and Up/Down change the followed car
@@ -428,13 +439,13 @@ players under **Triggers and wheels**.
 
 Beyond DS2 rumble, the race sends a per-frame driving state
 (`InputManager::set_force_feedback`: speed, brake, the ABS level, steering
-force, impacts, wheelspin) and each player's device turns it into native feedback:
+force, impacts, the edge of grip under throttle) and each player's device turns it into native feedback:
 
 | Device | Effect |
 |---|---|
-| DualSense (PS5) | Adaptive triggers. The one bound to the brake (Square): resistance after 20 % of travel, lighter at low speed; an 18 Hz vibration while the ABS is working, by its level from zero. The one bound to the throttle (Cross): a 35 Hz vibration while the drive wheels spin, by the wheelspin from zero. Both sent in one packet with `SDL_SendGamepadEffect`, only when an effect changes (SDL's trigger rumble does nothing on a DualSense). The packet carries the motors' rumble as SDL's own packets do: without it the controller switches back to its audio haptics and the rumble stops until the next change. A DualSense plays the small motor (the right grip) much lighter than the large one, so its level is sent 1.75 times stronger (at most full; `dualsense_rumble`), and Modern's lean is milder there (see Rumble) |
-| Xbox One/Series | Impulse triggers (`SDL_RumbleGamepadTriggers`): the brake's pulses at ~16 Hz while the ABS is working, up to 80 % by its level; the throttle's runs at half the wheelspin |
-| Wheels with force feedback | SDL haptics: a self-centring spring that firms up with speed (light when stopped, full from 120 km/h) and a constant force from the front tyres' lateral load (self-aligning feel; GT3's own steering-wheel force, sent at each of its 1/127 steps) plus a kick on impacts. The wheel's own autocentre is switched off while driving. Such a wheel gets no DS2 rumble: SDL's joystick rumble on Windows (DirectInput) and macOS resets the wheel's force feedback when it starts, which removed these effects at the start of every race (issue 119) |
+| DualSense (PS5) | Adaptive triggers. The one bound to the brake (Square): resistance after 20 % of travel, lighter at low speed; an 18 Hz vibration while the ABS is working, by its level from zero. The one bound to the throttle (Cross): a 35 Hz vibration as the driven wheels near the edge of their grip, by the traction level from zero. Both sent in one packet with `SDL_SendGamepadEffect`, only when an effect changes (SDL's trigger rumble does nothing on a DualSense). The packet carries the motors' rumble as SDL's own packets do: without it the controller switches back to its audio haptics and the rumble stops until the next change. A DualSense plays the small motor (the right grip) much lighter than the large one, so its level is sent 1.75 times stronger (at most full; `dualsense_rumble`), and Modern's lean is milder there (see Rumble) |
+| Xbox One/Series | Impulse triggers (`SDL_RumbleGamepadTriggers`), each level played as 0.3 + 0.7 × the level: the small motors hardly turn at the bottom of their range. The brake's throbs at 10 Hz while the ABS is working, between that and 40 % of it (not on and off: a short pulse ends before the motor has spun up); the throttle's holds the traction level |
+| Wheels with force feedback | SDL haptics: GT3's own steering-wheel force as a constant force, sent at each of its 1/127 steps, over a spring, shaped by **Wheel force** (below). The wheel's own autocentre is switched off while driving. Such a wheel gets no DS2 rumble: SDL's joystick rumble on Windows (DirectInput) and macOS resets the wheel's force feedback when it starts, which removed these effects at the start of every race (issue 119) |
 
 The ABS level (`VehicleTelemetry::abs_level`, 0..1, the strongest wheel's) is
 GT3's own ABS at work (physics §4.5): past the tire's best braking slip it takes
@@ -442,6 +453,35 @@ the slip over that target times G g of the pressure off. A car without the ABS
 (G 0) gives how far past that slip a wheel is locking, over 0.5. A brake
 pressure below the pedal does not count: GT3 also limits it by the tire's peak
 force, stopped or not.
+
+The traction level (`VehicleTelemetry::traction_level`, 0..1) is the same idea
+under throttle, on the wheels GT3's TCS reads. Two shares of what the tire has
+(physics §3.8): along the wheel, its slip over the tire's best drive slip (the
+TCS's target, 0.18 on tarmac); across it, how much of the friction circle the
+slip-angle force takes, or past the tire's best slip angle that angle over it.
+Combined as a circle of their own, 1 is the edge of grip: the level rises to
+0.4 from 85 % of the edge, then by 0.6 × how far past it, full at twice. A TCS
+that is cutting gives at least 0.4 + 0.6 × the share of the throttle it takes
+off, since it holds the slip short of the tire's best. The level is scaled by
+the pedal up to half travel, and none shows while the computer drives. On the
+disc's recorded time trial laps it shows for about a sixth of the time on
+throttle.
+
+**Wheel force** (`[ffb] wheel_mode`, Settings → Rumble & feedback):
+
+| | GT3 original | Modern (`auto`) |
+|---|---|---|
+| Steering force | GT3's: the front tyres' lateral force, the road under them and a little resistance to turning the wheel | GT3's, lighter in understeer |
+| Spring | Plain, the same at every speed | Light when stopped, full from 120 km/h; lighter in understeer and gone in a slide |
+| Impacts | Nothing | A kick of up to half the wheel's force |
+
+GT3's lateral term reaches its limit by about 3 degrees of front slip, so past that its force stays flat as more lock goes on, and only the car's lean takes some off. **Understeer lightening** takes that share off at GT3's full understeer (the yaw rate short of what the steering asks), and the spring goes with it. GT3's understeer and oversteer indicators jump from tick to tick, so the wheel eases towards them over a quarter of a second (`ffb::eased_indicator`).
+
+GT3 sends a wheel one constant force a frame and no spring, and never touches the Logitech wheel's own spring, which stays on while it plays. Its strength on a GT Force isn't known, and SDL's DirectInput open turns a wheel's own spring off, so GT3 original plays a plain spring on every wheel at **Centring spring**.
+
+**Steering force** (`steering`) and **Centring spring** (`spring`) go to 0 apart, for the spring alone or the force alone; **Wheel strength** scales both.
+
+The game's **GT FORCE** option switches a wheel's force for its player, as in GT3; **Vibration** doesn't, and switches the triggers.
 
 Effects stop by themselves ~0.25 s after the last update (pause, menus).
 The brake and throttle triggers are found from the race bindings: whichever of
@@ -452,8 +492,11 @@ The brake and throttle triggers are found from the race bindings: whichever of
 enabled = on
 triggers = on          ; DualSense / Xbox trigger effects
 wheel = on             ; wheel spring and steering force
+wheel_mode = auto      ; auto (modern) | modern | gt3
 strength = 1.00        ; overall wheel force, 0..2
-spring = 0.60          ; centring spring at speed, 0..1
+steering = 1.00        ; steering force, 0..1
+spring = 0.60          ; centring spring, 0..1 (Modern: at speed)
+understeer = 0.50      ; Modern: force taken off at full understeer, 0..1
 trigger_force = 0.60   ; DualSense brake resistance, 0..1
 invert = off           ; flip the wheel's steering force if it pulls the wrong way
 ```

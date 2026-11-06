@@ -23,7 +23,7 @@ disk or redistributed.
 | **The game** | GT Mode, Arcade, licenses, 2P battle, Replay Theater, Options: the game's own menus, text (every language on the disc), fonts, movies and soundtrack |
 | **Faithful racing** | physics, AI, cameras, HUD, replays, lighting, reflections, smoke and sounds reimplemented from the original's behaviour and compared side by side with it |
 | **Online battle** | the arcade's i.LINK Battle rebuilt for the internet and LANs: up to 6 players, session codes, no port forwarding |
-| **Quick race** | any of the game's events with any car, nothing to unlock |
+| **Quick race** | any of the game's events with any car, nothing to unlock; custom races: any course and laps, your own lineup of opponents (any car, color and skill) and your place on the grid, saved by name |
 | **Saves** | any number of named saves; import from and export to the PS2 original |
 | **Modern display** | any resolution and aspect ratio, widescreen, high refresh rates (or a 60 fps limit), MSAA, dynamic resolution, or the original 640×448 look |
 | **VR** | Meta Quest: the menus on a large virtual screen, races in stereo from the driver's seat, Touch controllers (sticks and analog triggers, or grab a steering wheel) |
@@ -125,7 +125,7 @@ game:
 | Settings | display, audio, controls, force feedback, touch, disc, online |
 | Mods | enable or disable installed mods |
 | Music jukebox | the soundtrack from your disc |
-| Quick race | any event with any car |
+| Quick race | any event with any car, or a custom race with your own grid of opponents |
 | Time trial | any car on any course; saved replays |
 | Movie theater | the game's movies |
 | Car database | specs, torque curves, upgrades and events |
@@ -167,11 +167,11 @@ beside it instead. Saves and replays can go in another folder of your choice
 
 ### Your music
 
-Your own MP3, FLAC and WAV files can play as race songs, in place of the
-disc's or mixed with them: choose their folder in **Settings → Audio → Music
-folder** (or copy them into `music/`), then pick the **Custom** or **Both** tab
-in the game's **Options → Favorite Music List**. In races, the pause screen's
-L1 / R1 skip songs. Step by step: [MUSIC](docs/MUSIC.md).
+Your own MP3, FLAC and WAV files can play as race songs: choose their folder
+in **Settings → Audio → Music folder** (or copy them into `music/`) and they
+play in place of the disc's. The **Both** and **Original** tabs in the game's
+**Options → Favorite Music List** mix them with the disc's or go back to it. In
+races, the pause screen's L1 / R1 skip songs. Step by step: [MUSIC](docs/MUSIC.md).
 
 ### Settings
 
@@ -200,6 +200,7 @@ are only there:
 | `[video] dynamic_resolution` | `on` / `off` | lower the 3D resolution (to 50% at most) when the GPU can't keep up and raise it while it keeps up, up to `render_scale`; with `auto`, up to the screen's full resolution (at most 1440 lines), starting where the last race ended (kept in `dynamic_start`). Default on for phones and tablets |
 | `[video] full_car_detail` | `on` / `off` | every car in full detail at any distance; `off`: distant cars switch to GT3's simpler models. Default on, off for phones and tablets |
 | `[video] showroom_wheels` | `on` / `off` | close cars in races get the car menus' detailed rims and tires; `off`: GT3's race wheels. Default on, off for phones and tablets |
+| `[video] sharp_menu_models` | `on` / `off` | cars and prizes in the menus at the screen's resolution; `off`: at the game's own 640x448, like the menu art. Default on; phones and tablets keep license cards and trophies at 640x448 |
 | `[video] heat_haze` | `on` / `off` | GT3's heat shimmer over some trackside camera shots in replays, on some courses. Default off |
 | `[video] gpu` | `auto` / `gles` / `gles_driver` / `0` | the 3D renderer: `auto` = SDL_GPU (Vulkan, Metal), or OpenGL ES where the GPU has no Vulkan (Windows, Linux); `gles` = OpenGL ES first; `gles_driver` = the same on Windows with the graphics driver's OpenGL ES rather than ANGLE; `0` = 2D-only (restart required). Settings offers only the kinds of OpenGL ES that open on the computer |
 | `[video] original_res` | `on` / `off` | *(file)* races at the PS2's 640×448 in a 4:3 frame |
@@ -211,7 +212,7 @@ are only there:
 | `[music] folder` | path | your music folder (absent: the user data folder's `music/`; Settings → Audio) |
 | `[saves] folder` | path | the save folder for `saves/` and `replays/` (absent: the user data folder; Settings → Disc & saves). On Android, a folder picked there (not a path) |
 | `[music] show_song` | `on` / `off` | the race song on the pause screen, with L1 / R1 to skip (default on) |
-| `[music] next_race` | `same` / `next` | same (default): a race, restart or replay starts with the song the last one ended on, from its start; next: a new song every time, as GT3 does (Settings → Audio → Next race starts with) |
+| `[music] next_race` | `next` / `same` | next (default): a new song every time, as GT3 does; same: a race, restart or replay starts with the song the last one ended on, from its start (Settings → Audio → Next race starts with) |
 | `[music] race_song` | text | the race song playing last (`disc:` or `yours:` and its id), for `next_race = same` |
 | `[race] views` | `all` / `gt3` | race views: GT3's plus bumper without mirror and far chase, or GT3's only |
 | `[race] camera_shake` | `on` / `off` | GT3's in-car vibration |
@@ -225,7 +226,7 @@ are only there:
 | `[touch]` | see [INPUT](docs/INPUT.md#touch-controls-phones-and-tablets) | on-screen controls on phones and tablets; Customize layout moves, resizes and hides each one |
 | `[online] server` | host name | relay server (default `gt3r.gameversions.com`; set in the lobby) |
 | `[online] update_check` | `on` / `off` | ask the relay server for a newer version at startup (Settings → Online) |
-| `[options]` | | the game's own Options menu (set in game); ours: `music_source` (`original` / `custom` / `both`) and `music_mix` (Both's `order` / `shuffle`), the music list's tabs |
+| `[options]` | | the game's own Options menu (set in game); ours: `music_source` (`original` / `custom` / `both`; unset: `custom`) and `music_mix` (Both's `order` / `shuffle`), the music list's tabs |
 | `[mods]` | | see [MODDING](docs/MODDING.md) |
 
 ### Saves

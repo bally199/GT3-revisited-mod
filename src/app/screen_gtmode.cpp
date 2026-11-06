@@ -45,10 +45,11 @@ namespace {
 class MenuModelRenderer {
 public:
     void draw(App& app, SDL_Renderer* r, const menu::Element& e, const SDL_FRect& box, float alpha,
-              const std::string& page, const menu::MenuImage* image) {
+              const std::string& page, const menu::MenuImage* image, menu::MenuCanvas* canvas) {
         (void)alpha;
         if (!app.gpu() || !app.vfs()) return;
         frame_ = app.frame();
+        canvas_ = canvas && canvas->on() ? canvas : nullptr;
         // The car renders' own image (car_render_* widgets, the arcade pickers' "car" element) is
         // the showroom's reflection map.
         SDL_GPUTexture* env = env_map(app, image);
@@ -67,7 +68,7 @@ public:
         // The prize car page: GT3's carousel of the set's candidates and its roulette over the
         // whole frame (game::car_get_scene); the widget's own image is the floor light.
         if (e.widget_class && *e.widget_class == "render_model" && page == "car_get") {
-            draw_car_get(app, r, e, box, image);
+            draw_car_get(app, r, e, placed(box), image);
             return;
         }
         std::string car, wheel;
@@ -102,12 +103,12 @@ public:
             if (m && player >= 0) {
                 // menu/showroom_split.fbi; player 2 mirrored.
                 const ShowroomCamera& split = showroom_camera(app, "split");
-                showroom(app, r, box, *m, entry, player == 1 ? mirrored(split) : split, frame, player + 1, false, 1,
-                         env, 2);
+                showroom(app, r, placed(box), *m, entry, player == 1 ? mirrored(split) : split, frame, player + 1,
+                         false, 1, env, 2);
             } else if (m) {
                 const bool compulsory = page.rfind("ar/select_compulsory", 0) == 0;
-                showroom(app, r, box, *m, entry, showroom_camera(app, compulsory ? "compulsory" : "single"), frame, 0,
-                         false, 1, env, compulsory ? 2 : 4);
+                showroom(app, r, placed(box), *m, entry, showroom_camera(app, compulsory ? "compulsory" : "single"),
+                         frame, 0, false, 1, env, compulsory ? 2 : 4);
             }
             return;
         }
@@ -141,8 +142,8 @@ public:
                 // GT-mode kinds: the fast (k = 8) intro fade; a dirty car reflects less (1 - dirt).
                 // A wheel change keeps the camera. The car wash spins its car (game::car_wash_spin).
                 const game::CarWashSpin spin = game::car_wash_spin();
-                showroom(app, r, menu_rect(0, 0, 640, 448), *m, kind + ":" + car + "#" + std::to_string(paint), cam,
-                         -1, 0, true, 1.0f - dirt, env, 4, kind == "carwash" ? &spin : nullptr);
+                showroom(app, r, placed(menu_rect(0, 0, 640, 448)), *m, kind + ":" + car + "#" + std::to_string(paint),
+                         cam, -1, 0, true, 1.0f - dirt, env, 4, kind == "carwash" ? &spin : nullptr);
                 return;
             }
         }
@@ -241,6 +242,25 @@ private:
         return t;
     }
 
+    // A model's rectangle in the pixels it is drawn in (the canvas's picture when it has one).
+    SDL_FRect placed(const SDL_FRect& box) const { return canvas_ ? canvas_->to_picture(box) : box; }
+    // The rectangle's width / height in the game's pixels, which its cameras are made for.
+    float game_aspect(const SDL_FRect& page) const {
+        const float a = page.w / std::max(page.h, 1.0f);
+        return canvas_ ? a * canvas_->scale_y() / canvas_->scale_x() : a;
+    }
+    // While it lives the canvas's picture is the render target.
+    struct InPicture {
+        menu::MenuCanvas* canvas;
+        SDL_Renderer* r;
+        InPicture(menu::MenuCanvas* c, SDL_Renderer* rr) : canvas(c), r(rr) {
+            if (canvas) canvas->model_begin(r);
+        }
+        ~InPicture() {
+            if (canvas) canvas->model_end(r);
+        }
+    };
+
     using ShowroomCamera = render::ShowroomCamera;
 
     // Xbox: the car pages' one pass (see showroom()) supersampled instead: drawn at twice the
@@ -281,7 +301,8 @@ private:
         // Phones and tablets: one pass (MSAA still smooths the edges) and so one mirror pass,
         // 3 renders a frame instead of 10. Each pass is its own small 3D render, submit and
         // composite, which a tile-based mobile GPU pays for in full (5 fps on a Galaxy A15).
-        if (platform::is_mobile()) passes = 1;
+        // At the screen's resolution the passes' part of a game pixel has nothing left to add.
+        if (platform::is_mobile() || canvas_) passes = 1;
         diag_frame();
 #if GT3R_UWP
         // Xbox (OpenGL ES on ANGLE): one pass too. With the jitter passes' scratch target every
@@ -350,11 +371,12 @@ private:
             view = render::translate({cam.key(0x47), cam.key(0x48), 0}) * render::rotate_y(cam.key(0x4A) * d2r) *
                    render::rotate_x(cam.key(0x49) * d2r) * view;
         }
-        const float aspect = page.w / std::max(page.h, 1.0f);
+        const float aspect = game_aspect(page);
         const float vfov = 2.0f * std::atan(std::tan(cam.key(0x4B) * 0.5f * 3.14159265f / 180.0f) / aspect);
         render::Mat4 proj = render::perspective(vfov, aspect, 0.1f, 1000.0f);
         proj.at(1, 1) /= 1.098f; // the game's vertical aspect fix (as in the race)
         if (show_.load_wait < kLoadFrames) return;
+        InPicture in_picture(canvas_, r);
         // The floor reflection: the car mirrored about the floor, added at 0.65 x the intro
         // fade (first visible 5 frames after loading, full after 88), drawn first.
         // The intro fade spring: k = 2 (arcade kinds, full after 88 frames) or k = 8 (the GT-mode
@@ -416,7 +438,8 @@ private:
         if (entry.rfind("buycar:", 0) != 0 && !(cap2d_.bits & 2)) // car_render_buy draws no floor mirror
         add_mirror(r, page, 0.65f * fade * std::clamp(reflect, 0.0f, 1.0f), [&](int w, int h) {
             render::DrawOptions o = showroom_options(cam, view, true, env, reflect);
-            supersample(app, o, w, h);
+            o.repeated = canvas_ != nullptr;
+            if (!canvas_) supersample(app, o, w, h); // (at the screen's resolution already otherwise)
             o.clear[0] = o.clear[1] = o.clear[2] = 0;
             o.clear[3] = 1;
             // The game mirrors with (1, -1, 1); we use (-1, -1, 1), a rotation, so the faces
@@ -428,7 +451,8 @@ private:
         });
         composite(r, page, [&](SDL_Texture* tex, int w, int h, float bg) {
             render::DrawOptions o = showroom_options(cam, view, false, env, reflect);
-            supersample(app, o, w, h);
+            o.repeated = canvas_ != nullptr;
+            if (!canvas_) supersample(app, o, w, h);
             o.clear[0] = o.clear[1] = o.clear[2] = bg;
             o.clear[3] = 1;
             render::View3D& v = bg > 0.5f ? *view_white_ : *view_black_;
@@ -463,7 +487,7 @@ private:
         for (const game::CarGetScene::Car& c : sc.cars) models.push_back(this->car(app, c.car, c.paint, std::string(), cap));
         const render::Vec3 eye{sc.eye[0], sc.eye[1], sc.eye[2]}, look{sc.look[0], sc.look[1], sc.look[2]};
         const render::Mat4 view = render::look_at(eye, look, {sc.up[0], sc.up[1], sc.up[2]});
-        const float aspect = page.w / std::max(page.h, 1.0f);
+        const float aspect = game_aspect(page);
         const float d2r = 3.14159265f / 180.0f;
         const float vfov = 2.0f * std::atan(std::tan(game::CarGetScene::kHalfFov * d2r) / aspect);
         render::Mat4 proj = render::perspective(vfov, aspect, 0.1f, 1000.0f);
@@ -517,12 +541,14 @@ private:
             if (items.empty() || opacity <= 0) return;
             composite(r, page, [&](SDL_Texture*, int w, int h, float bg) {
                 render::DrawOptions o;
+                o.repeated = canvas_ != nullptr;
                 o.clear[0] = o.clear[1] = o.clear[2] = bg;
                 o.clear[3] = 1;
                 render::View3D& v = bg > 0.5f ? *view_white_ : *view_black_;
                 v.draw(r, SDL_FRect{0, 0, float(w), float(h)}, view, proj, eye, items, o);
             }, opacity);
         };
+        InPicture in_picture(canvas_, r);
         for (const game::CarGetScene::Car& c : sc.cars)
             if (!c.lit) draw_light(c, sc.others);
         draw_cars(false, sc.others);
@@ -548,7 +574,7 @@ private:
 
     // The prize model of a presentation (render::PrizeView, shared with the race
     // result medals): restarted for every new presentation, animated in real time.
-    void draw_prize(App& app, SDL_Renderer* r, const menu::Element& e, const SDL_FRect& box, const std::string& path,
+    void draw_prize(App& app, SDL_Renderer* r, const menu::Element& e, const SDL_FRect& page_box, const std::string& path,
                     int serial, float fade, bool trophy, bool mini = false) {
         if (!prize_ || prize_path_ != path) {
             prize_.reset();
@@ -578,6 +604,10 @@ private:
         double dt = double(now - prize_ticks_) / 1e9;
         prize_->tick(dt < 0.001 ? 1.0 / 60 : std::min(dt, 0.1));
         prize_ticks_ = now;
+        // Phones and tablets: a model with depth of field stays in the page. Its passes at the
+        // screen's resolution take a whole frame (a license card: 58 to 22 fps on a PowerVR BXM).
+        if (platform::is_mobile() && prize_->focus() > 1) canvas_ = nullptr;
+        const SDL_FRect box = placed(page_box);
         // The scene covers the page (the widget only marks a spot): the whole 640 x 448 frame.
         SDL_FRect area = box;
         if (e.w > 0 && e.h > 0) {
@@ -600,23 +630,27 @@ private:
         static const float kJ4[4][2] = {{0.375f, 0.25f}, {0.125f, 0.75f}, {0.875f, 0.25f}, {0.625f, 0.75f}};
         static const float kJ6[6][2] = {{0.4646f, 0.4646f}, {0.1313f, 0.7979f}, {0.5353f, 0.8686f},
                                         {0.8686f, 0.5353f}, {0.7979f, 0.1313f}, {0.2020f, 0.2020f}};
-        int passes = trophy ? 4 : 6;
+        // At the screen's resolution only the depth of field needs the passes (as in showroom).
+        int passes = canvas_ && prize_->focus() <= 1 ? 1 : trophy ? 4 : 6;
 #if GT3R_UWP
         diag_frame();
         if (!(cap2d_.bits & 8)) passes = 1; // as the car pages' showroom (Xbox: see showroom())
 #endif
+        InPicture in_picture(canvas_, r);
         composite(
             r, area,
             [&](SDL_Texture* tex, int w, int h, float bg) {
                 const float clear[4] = {bg, bg, bg, 1};
                 SDL_Texture*& tmp = targets_for(pass_tex_, w, h).black;
-                if (!tmp) tmp = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, w, h);
+                if (!tmp && passes > 1) tmp = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, w, h);
                 const float A = prize_->focus(), B = prize_->aperture();
-                const float px_scale = float(w) / 640.0f;
+                const float px_scale = float(w) / 640.0f / (canvas_ ? canvas_->scale_x() : 1.0f); // of a screen pixel
                 for (int i = 0; i < passes; ++i) {
                     render::PrizeView::Pass ps;
                     const float* j = trophy ? kJ4[i] : kJ6[i];
-                    ps.px = (j[0] - 0.5f) * px_scale, ps.py = (j[1] - 0.5f) * px_scale;
+                    if (passes > 1) ps.px = (j[0] - 0.5f) * px_scale, ps.py = (j[1] - 0.5f) * px_scale;
+                    ps.aspect = game_aspect(area);
+                    ps.repeated = canvas_ != nullptr;
                     if (A > 1) {
                         float th = float(i) * 6.2831853f / float(passes);
                         ps.ex = B * std::cos(th), ps.ey = B * std::sin(th), ps.focus = A;
@@ -852,6 +886,7 @@ private:
     std::map<std::pair<int, int>, Targets> pass_tex_; // multi-pass scratch targets (in .black)
     std::map<std::pair<int, int>, SDL_Texture*> jitter_extra_; // GT3R_SHOWROOM bit 64 (diagnostics)
     int frame_ = 0; // App::frame of this draw
+    menu::MenuCanvas* canvas_ = nullptr; // of this draw, when its models go into the picture
     std::string prize_path_;
     int prize_serial_ = -1, prize_skip_ = -1;
     u64 prize_ticks_ = 0;
@@ -869,8 +904,9 @@ MenuModelRenderer& menu_models() {
 const bool gt_mode_hooks_installed = [] {
     game::install_gt_mode_menu();
     menu::flow::set_gt_mode_widget_drawer([](App& app, SDL_Renderer* r, const menu::Element& e, const SDL_FRect& box,
-                                             float alpha, const std::string& page, const menu::MenuImage* image) {
-        menu_models().draw(app, r, e, box, alpha, page, image);
+                                             float alpha, const std::string& page, const menu::MenuImage* image,
+                                             menu::MenuCanvas* canvas) {
+        menu_models().draw(app, r, e, box, alpha, page, image, canvas);
     });
     menu::flow::set_gt_mode_widget_release([](App& app) { menu_models().release(app); });
     return true;

@@ -48,6 +48,7 @@ struct GameRequest {
     std::string car;        // car id chosen in the menus (pmb element name without a leading '_'; empty = default)
     std::string car_class;  // arcade class chosen ("class_c", ...)
     std::string page;       // menu page the request came from
+    int time_limit_s = 0;   // attract_demo: the demo's time limit in seconds (0 = none)
 
     // GT mode (filled by game/gt_mode_actions.cpp; empty / null elsewhere):
     std::string event;      // event record label (database table 32), e.g. "Gsunday_e_0001", "L0B0001"
@@ -83,6 +84,14 @@ struct GameRequest {
     // Opponents (car variant labels) chosen by GT mode, e.g. a championship
     // field kept for every round; empty = draw them from the event's entries.
     std::vector<std::string> opponents;
+    // Quick race's custom race (`opponents` its cars, in grid order): each opponent's paint index (-1: the game's draw) and
+    // skill (an event label, race::FieldConfig::opponent_skills), the race without its event's rubber band, its laps (0: the
+    // event's) and the player's grid slot (-1: behind the opponents).
+    std::vector<int> opponent_paints;
+    std::vector<std::string> opponent_skills;
+    bool no_rubber_band = false;
+    int laps = 0;
+    int player_slot = -1;
     // Championship round (GT mode): 1-based round and round count, 0 = not a championship.
     int champ_round = 0;
     int champ_rounds = 0;

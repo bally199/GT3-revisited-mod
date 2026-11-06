@@ -79,6 +79,7 @@ struct ExactFieldOptions {
     u8 config = 0;              // the race-flow byte (the race's play kind): 0 live, 2 the attract demo (every car a CPU car)
                                 // and the quick menu's race, 3 the AI drives the players' cars (the pad decoded)
     bool records_off = false;   // race info + 0x6C, which the drivers set for the quick menu's race: no run is judged
+    bool locked = false;        // race info + 0x7C, which GT Mode's Preview sets: no laps, no time limit, no records
     int laps = 0;               // the race's laps (0: the event's time limit)
     ExactHuman player, second;
     // A replay: the race as recorded (sim/exact/race_record.h), built from its setup and stepped from its frames and changes
@@ -136,6 +137,10 @@ struct FieldConfig {
     // (arcade: the random draw).
     bool grid_by_power = false;
     bool grid_hp = false;
+    // Quick race's custom race: each opponent's skill, an event label whose driver overrides it takes in place of the race's
+    // ("" or past the list: the race's), and the race without its event's rubber band.
+    std::vector<std::string> opponent_skills;
+    bool no_rubber_band = false;
     // The split-screen battle's options (its Options page, docs/dev/RACE.md "Options"): the catch-up for the
     // trailing player (0 off, 1 low, 2 high), the handicap in metres (> 0: player 2 starts back, < 0: player 1), tyre damage.
     int battle_catchup = 0;

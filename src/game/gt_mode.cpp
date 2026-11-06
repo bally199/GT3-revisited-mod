@@ -461,6 +461,7 @@ bool GtData::load(const Reader& read) {
                 demos.push_back({e.name, e.str_at(e.u32_at(4)), e.u32_at(8) ? e.str_at(e.u32_at(8)) : std::string(),
                                  int(e.u32_at(16))});
         if (auto idle = gcf.section_u32(0, 0); idle && *idle > 0 && *idle < 3600) title_idle_seconds = int(*idle);
+        if (auto limit = gcf.section_u32(0, 4); limit && *limit < 3600) demo_time_limit_seconds = int(*limit);
         // Arcade lists: group entries {name, count, list} whose list offsets
         // (relative to the group) lead to the course / car entries.
         auto groups = [&](u32 tag, auto&& each) {
@@ -678,21 +679,22 @@ s64 GtMode::sell_price(const GarageCar& c) const {
     return s64(s32(car_price(c.car)) / 4);
 }
 
-void GtMode::set_stock_ownership(GarageCar& g) const {
-    g.owned.reset();
-    for (size_t i = 0; i < g.parts.size(); ++i) {
-        int t = data::kCarPartTables[i];
-        if (!g.parts[i] || t < 0) continue;
-        const ByteSpan* r = db().record(data::TableId(t), g.parts[i]);
-        if (!r || r->size() <= 0x10) continue;
-        int id = goods_id(t, (*r)[0x10]);
-        if (id >= 0) g.owned.set(size_t(id));
-    }
+std::bitset<88> GtMode::stock_ownership(const std::string& label) const {
+    std::bitset<88> owned;
+    const data::Car* car = db().car(label);
+    if (!car) return owned;
+    for (size_t i = 0; i < car->parts.size(); ++i)
+        if (int id = stock_goods(db(), *car, i); id >= 0) owned.set(size_t(id));
     // Front tire goods also own the matching rear set.
     for (int f = 56; f <= 65; ++f)
-        if (g.owned.test(size_t(f))) g.owned.set(size_t(f + 11));
+        if (owned.test(size_t(f))) owned.set(size_t(f + 11));
     // Rally cars come with dirt tyres.
-    if (car_category(g.car) == 2) g.owned.set(66), g.owned.set(77);
+    if (car_category(label) == 2) owned.set(66), owned.set(77);
+    return owned;
+}
+
+void GtMode::own_stock_goods(GameState& s) const {
+    for (GarageCar& c : s.garage) c.owned |= stock_ownership(c.car);
 }
 
 std::optional<GarageCar> GtMode::make_car(const std::string& car) const {
@@ -704,7 +706,7 @@ std::optional<GarageCar> GtMode::make_car(const std::string& car) const {
     g.parts[26] = 0; // wheel slot: stock
     g.settings = sim::stock_settings(db(), car, g.parts);
     g.ref_final = g.settings.final_drive;
-    set_stock_ownership(g);
+    g.owned = stock_ownership(car);
     g.cond = CarCondition{};
     return g;
 }

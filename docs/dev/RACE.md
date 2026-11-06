@@ -154,7 +154,9 @@ and its motors stop. Replays and demonstrations send nothing, and the Vibration 
 from `RaceScreen::feedback`): the brake's follows GT3's ABS at work
 (`VehicleTelemetry::abs_level`, from `exact_telemetry`: the slip over the tyre's best
 braking slip times G g, the share of pressure the ABS takes off), the throttle's the
-wheelspin (`RumbleModel::wheelspin`); Xbox impulse triggers as levels, a DualSense's as
+edge of grip (`VehicleTelemetry::traction_level`, from `exact_telemetry`: the slip and the
+slip-angle force as shares of the tyre's best, see docs/INPUT.md), neither while the
+computer drives; Xbox impulse triggers as levels, a DualSense's as
 adaptive-trigger vibrations (`ffb::brake_trigger_effect`, `throttle_trigger_effect`), as
 SDL's trigger rumble does nothing there.
 
@@ -337,8 +339,8 @@ SDL's trigger rumble does nothing there.
     side by side with it on.
   - ghost: whether a better run replaces the ghost at once (on) or after "Update Ghost?" (off);
     it never hides the ghost (see "Ghost").
-  Not wired: GT FORCE force feedback and the steering-assist types (wheel input only; platform's
-  force-feedback path), the 1P tyre-damage option (no race reader in the original).
+  Not wired: the GT FORCE steering-assist types (wheel input only), the 1P tyre-damage option (no
+  race reader in the original).
 - 2P battle, 4:3 top / bottom halves (matched to captures of the original): ordinal rank top
   left with the map below it, Fastest / Last / Lap (small label, large time) top right, speed then
   a dark panel with the gear digit, a ghost "> 8", AT / MT, the bar tachometer and a red shift
@@ -403,7 +405,9 @@ SDL's trigger rumble does nothing there.
   each 2-texel mean adds spacing^2 / 4 to the variance, the bilinear enlargement spacing^2 / 6), and
   the layers move it by the original level's whole shift. The same blur and shift, without the
   original's texel steps. Costs about 0.6 ms a frame at 2560 x 1440
-  with 4x MSAA on an M4 Pro (`gpusync=1`). `GT3R_NO_DOF=1` turns it off for comparisons.
+  with 4x MSAA on an M4 Pro (`gpusync=1`). `[video] depth_of_field = standard` keeps GT3's
+  small pictures at any size, `off` (the default on phones and tablets) turns it off, as
+  `GT3R_NO_DOF=1` does for comparisons.
 - Tyre smoke and dust (`race/tyre_smoke.*`): a 256-puff pool fed each tick by every car's wheels
   with smoke-emission intensity > 0.001 (`VehicleTelemetry::smoke_emit`, physics
   physics §8.3b — not the slip intensity `smoke` of physics §8.3: race used that until now and made
@@ -871,7 +875,7 @@ rebuilds its field from the record wherever it is played (`build_vehicle` while 
   `<save folder>/replays/<course>_<car>_<stamp>.gt3replay` (two saves in one second get the next
   stamp). That folder is all the theater lists: no slots, no capacity limit.
 - Selection screen: Circle lists saved replays; Cross plays one.
-- During playback: the replay cameras, the original's replay pad (see REPLAY OPTIONS below),
+- During playback: the replay cameras, GT3's replay pad (see REPLAY OPTIONS below),
   Start pauses (the replay pause; Select there: Resume, Restart replay, Camera, Save, Stop
   replay, Exit).
 
@@ -1017,7 +1021,7 @@ original's pages: theater, DEMONSTRATION list, Analyzer top, REPLAY OPTIONS):
   is open (`ReplayDirector::switch_gate`). Battles: a car near another (10 m) for 2 s after 4 s
   alone becomes a pair (ends beyond 30 m); in modes 1 / 2 the camera aims between the pair and
   widens to keep both. A new car is panned to over 1 s (mode 0 / 3: 0.25 s); a manual change
-  cuts to a new shot. The attract demo in mode 0 moves to the next car every 5 s. 2P replays
+  cuts to a new shot. The attract demo in mode 0 moves to the next car every 5 s (not GT Mode's Preview). 2P replays
   keep each player's car.
 
 ### Replay (TV) cameras
@@ -1216,6 +1220,18 @@ time limit (nothing ends at the limit itself); its laps stop counting there. The
 every step, ties keep their places) is the HUD position and the player's place: more laps first,
 then running cars by distance, a running car ahead of a finished one, finished cars by finish time.
 `GT3R_RACE="event=AEAT0001"` starts one directly.
+
+Quick race's custom race is the player's own race on one page: any course, the laps and the lineup, pole first: one to five
+opponents, as many as the course's start grid holds, and the player's car and place among them (`GameRequest::opponents`,
+`opponent_paints`, `opponent_skills`, `no_rubber_band`, `laps`, `player_slot`; the page's lineup is `app/opponent_grid.h`,
+which knows nothing of Quick race). It
+runs on the arcade's Normal race, Class S's or on dirt the dirt race's, for that race's start and tyre wear. Each opponent is
+any car in any of its colours, and its skill is an arcade difficulty: the driver overrides (ai §9.2) of the arcade race of
+that difficulty, read from the disc, so they differ by release. `FieldConfig::opponent_skills` names that event per opponent
+and `sim::exact::StartEntry::driver` carries its overrides, in place of the race's. The rubber band is cleared
+(`clear_rubber_band`) unless the player turns catch-up on, since it would hold a Professional field back. Replays keep the
+overrides in the race record (version 5) and the paints in the file (format v13). A custom race can be saved under a name:
+`[quickrace_race<n>]` in config.ini, the same keys as the last one in `[quickrace_custom]`.
 
 ### Starts and event fields
 
@@ -1533,7 +1549,8 @@ trial ("compulsory", course ids `tt01`..`tt10` = events `AT010001`..: course
 and car from the event), free run / time attack (`ATAF0001`, the menu's
 course and car), single race (`A{E,N,H,P}{C,B,A,S}T0001` events: opponents,
 laps, AI parameters) and the GT-mode requests (`go_race` with opponents;
-`go_license`, `go_machine_test`, `go_free_run`, `go_preview` as time trials; a
+`go_license`, `go_machine_test`, `go_free_run` as time trials; `go_preview` as an attract
+demo of the event, see "Title attract demo"; a
 GT-mode garage car comes as a full `sim::CarSpec`). 2P battle runs as a time
 trial. Before popping, the screen posts a `menu::flow::GameResult`
 (finished, position, cars, total time, best lap, lap times, distance). Menu car ids are database labels without their
@@ -1808,10 +1825,21 @@ screen, `screen_race_license.cpp` the flow. The rules (presentation §A):
   (`ExactFieldOptions::config` 2, what GT3's demo runner passes: every car, slot 0 too, is a CPU
   car, the event's overrides varied by grid slot, no records); demo events start every car at
   their +0x198 speed, no countdown,
-  TV cameras, no HUD; any button ends it (finished = false), else it ends
-  after 1800 steps (30 s, the attract demo's timer) or 5 s after the finish. Its replay
+  TV cameras, no HUD; any button ends it (finished = false; ours, kept on purpose: GT3's
+  ends on Start alone), else its time limit does
+  (`GameRequest::time_limit_s`, gcf section 0's second word, 105 s on every release; finished =
+  true, so the next demo starts). The event's 20 laps cannot end it first; if they did, the race
+  would end 3 s after car 0's last lap, finished = false, back to the title. Its replay
   view is picked per demo (`race::pick_attract_view`, `attract_view_`): mode 0 MANUAL, mode
   2 with a random target or mode 1 AUTO, mode 1 forced after two demos without it.
+- GT Mode's Preview (`go_preview`, the entry page's PREVIEW): the same race on the event the
+  menus chose (`race_preview_`, gt_mode §11): the event's start and countdown, no car of the
+  player's, and `ExactFieldOptions::locked` (race info +0x7C): no laps, no time limit, so only
+  Start ends it (no pause window, the race-exit transition), no car change every 300 frames, and
+  the playlist's race songs at the replay level instead of the demo track. The other buttons are
+  the replay pad's (Cross the driver's view, Up / Down the car, mode 1's cuts), and as in a replay
+  there is no rear-view mirror or rumble, the menu touch controls and the replay sound views. The
+  menus resume on the entry page's PREVIEW, nothing counted (no day, the ride car untouched).
 
 ## Pit stops and tyre wear
 
@@ -2015,11 +2043,12 @@ by the course area):
 
 ## Controller force feedback
 
-Once per frame while someone drives (not paused, in replays, menus, after
-the finish or with Vibration off): `ForceFeedbackState` with speed, the
-applied brake, ABS, the steering force -(fy_FL + fy_FR) / front axle load
-(tyre fy points to the wheel's right) and a jolt from wall / car impulses
-(/ 5000). Player 2 too in a 2P battle.
+Once per frame while someone drives (not paused, in replays, menus or after
+the finish): `ForceFeedbackState` with speed, the applied brake, ABS, GT3's
+steering force (car +0x16D6; none for a car the pad doesn't drive, as its pad
+output), GT3's understeer and oversteer indicators, a jolt from wall / car
+impulses (/ 5000) and each player's two switches: `vib1` / `vib2` for the
+triggers, `force_feedback_1p` / `2p` for the wheel. Player 2 too in a 2P battle.
 
 ## Performance
 

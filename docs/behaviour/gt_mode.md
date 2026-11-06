@@ -39,7 +39,7 @@ where noted. `GtData::load` (`src/game/gt_mode.cpp`) reads:
 | Source | What GT Mode takes from it |
 |---|---|
 | `database/paramdb_us.db` (+ string tables) | cars (price, flags, category, region), parts, events, regulations, courses (`docs/formats/database.md`) |
-| `gameconf/product.gcf` (`src/game/gcf.*`) | constants (`initial`, `car_wash`, `oil_change`, `wheel`), section 0 (title idle time), section 4 (the 364 GT-mode result codes and their unlock level), section 12 (attract demos), section 15 (prize sets), sections 8 and 14 (arcade course and car lists) |
+| `gameconf/product.gcf` (`src/game/gcf.*`) | constants (`initial`, `car_wash`, `oil_change`, `wheel`), section 0 (title idle time, demo time limit), section 4 (the 364 GT-mode result codes and their unlock level), section 12 (attract demos), section 15 (prize sets), sections 8 and 14 (arcade course and car lists) |
 | `menu/gt_mode.mbl` (`src/game/gt_catalog.*`) | what GT Mode offers: dealer cars (`cd/` pages, action `set_car_code`), race series (`r/<tier>/<series>` pages, `set_race_code` / `set_race_code_champ`), license tests (`lc/lc_<id>` pages, `go_license`), tune-shop pages. The game has no separate list of these: its menus are the list. |
 | `database/carcolor.db` / `.sdb` | paint lists per body model and paint names (§7) |
 | `bgm/ads.inf` | the race songs, for the options block of a PS2 save (§12) |
@@ -365,9 +365,14 @@ parts table and a stage (part record +0x10). The ids are consecutive per table
 Only the ids the US menu offers can be bought (§6.4). Racing modification (49),
 traction control (55) and stability control (84) are not among them.
 
-**Stock goods.** A new car owns the goods of its stock parts. Owning a front tire also
-owns the matching rear tire. Rally cars (car category 2, car +0xF1) also own dirt
-tires (`set_stock_ownership`).
+**Stock goods.** A new car owns the goods of its stock parts (`stock_goods`). A slot that
+holds no part counts as the category's stage-0 goods, so a part bought later can always
+be swapped back to Normal. Three things own nothing: the intercooler of a car built
+without a turbo, the driveshaft of an FF, MR or RR car, and a racing modification
+without a record. A car whose stock part is an upgrade, such as a race car's racing
+muffler, owns that part and not the Normal it never had. Owning a front tire also owns
+the matching rear tire. Rally cars (car category 2, car +0xF1) also own dirt tires
+(`stock_ownership`). A save loaded from an older version gets any of these its cars lack.
 
 ### §6.2 Buying a part
 
@@ -882,7 +887,8 @@ tires cannot be changed for a dirt event (`dirt_tire_only`).
 **Part change pages.** The `chg/` pages list the parts the car owns. Choosing one fits
 it at once (§6.3) and saves. Items for goods the car does not own are disabled. The
 `attach_*` marks show what is fitted. A stage-0 item also counts as fitted when the
-car has its stock part.
+car has its stock part. Port polish, engine balance, displacement and weight reduction
+have no page: they stay on the car once bought.
 
 **Part rows.** On Change Parts and the `chg/` category pages, each row names the part
 fitted in its slot, in the game's language (the part-name texts of `text/realtime.dat`;
@@ -891,7 +897,7 @@ parts read "Normal", "N/A" or "-", and engine works that are done read "Installe
 few rows follow the car:
 
 - Turbo: "N/A" on a car without a turbo until a turbo kit is fitted.
-- Intercooler: "-" without a turbo.
+- Intercooler: "-" on a car built without a turbo, whatever turbo kit it has.
 - Driveshaft: "-" on FF, MR and RR cars.
 - AYC: "Installed" when the AYC limited-slip is fitted, else "N/A".
 - Tires, on a dirt event: the dirt tires when the car owns them, else "----".
@@ -910,7 +916,8 @@ The setting files are in §19.
 ## §15 Attract demo field
 
 After 20 s idle on the title (gcf section 0), the title plays demo races from gcf
-section 12 in turn. The F1 demos (level 1) play only once the save holds the S license.
+section 12 in turn, each up to the time limit in section 0's second word (105 s on
+every release), which comes long before the demos' 20 laps. The F1 demos (level 1) play only once the save holds the S license.
 There are 10 demos on this disc, two of them F1. Every demo on the disc has no car of
 its own (word +8 is empty). The engine therefore draws the **whole** field, slots 0 to
 cars − 1, from the event's pool with the race generator (§20.4). Slot 0 is the car the
@@ -1210,6 +1217,7 @@ The card is drawn in six passes, each with a small sub-pixel offset. When the sc
 focus distance is above 1, each pass also moves the eye around a circle of the scene's
 aperture radius (depth of field). Pass *i* is blended over the passes before it at
 1 / (*i* + 1), so every pass counts equally in the average.
+At the screen's resolution (menus §15) a model with no depth of field takes one pass.
 
 **Championship trophy** (`trophy_get`, `menu/champ_NN.prm`, NN = the picked trophy
 00–09, §20.3):

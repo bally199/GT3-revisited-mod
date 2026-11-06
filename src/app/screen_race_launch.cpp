@@ -133,7 +133,14 @@ void RaceScreen::resolve_launch() {
     if (!listed) courses_.push_back({course, course});
     // Races with opponents: the event gives the field, laps and AI parameters.
     if ((rq.mode == "single_race" || rq.mode == "go_race") && db_.event(code)) race_event_ = code;
-    if (!rq.opponents.empty()) race_opponents_ = rq.opponents; // GT mode: the field drawn by the menus
+    if (!rq.opponents.empty()) { // GT mode: the field drawn by the menus; Quick race's custom race: the player's own
+        race_opponents_ = rq.opponents;
+        race_opponent_paints_ = rq.opponent_paints;
+        race_opponent_skills_ = rq.opponent_skills;
+        race_no_rubber_band_ = rq.no_rubber_band;
+        race_chosen_laps_ = rq.laps;
+        race_player_slot_ = rq.player_slot;
+    }
     // Arcade Single Race: the field is drawn from the event's pool with the race module's
     // generator (gt_mode §20.4), slots 1 .. cars-1.
     else if (rq.mode == "single_race" && ev && !online_)
@@ -153,11 +160,14 @@ void RaceScreen::resolve_launch() {
     // (Quick race practice with a car of the player's choice: that car's own paint.)
     event_paint_id_ = ev && license_mode && (!rq.practice || rq.car.empty()) ? license.color : 0xFFFFFFFFu;
     // Title-screen attract demo: the event's cars all driven by the computer, TV cameras,
-    // no HUD; any button ends it.
+    // no HUD; any button ends it. GT Mode's Preview is the same race on the event the menus
+    // chose (gt_mode §11): the player's car is not in it, and only Start ends it.
     std::string attract_slot0;
-    if (rq.mode == "attract_demo" && ev) {
+    if ((rq.mode == "attract_demo" || rq.mode == "go_preview") && ev) {
         attract_ = true;
+        race_preview_ = rq.mode == "go_preview";
         race_event_ = code;
+        attract_limit_s_ = rq.time_limit_s;
         preset_.autodrive = true;
         preset_.hud = false;
         preset_.cam = int(CameraMode::Tv);

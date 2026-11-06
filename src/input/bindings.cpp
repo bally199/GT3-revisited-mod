@@ -874,6 +874,11 @@ bool PlayerBindings::custom(DeviceKind kind, bool race) const {
     return has_custom(kind, race) && (race ? race_custom_on : menu_custom_on);
 }
 
+bool PlayerBindings::controller_custom(DeviceKind kind, bool race) const {
+    return kind != DeviceKind::Keyboard && (race ? race_custom_on : menu_custom_on) &&
+           (race ? controller_race : controller_menu)[controller_index(kind)];
+}
+
 void PlayerBindings::begin_custom(DeviceKind kind, bool race) {
     if (custom(kind, race)) return;
     // Both sets as they stand (the layout's; under "gt3" the menu's) become the custom ones.
@@ -959,16 +964,27 @@ void PlayerBindings::load(const IniDocument& cfg, const std::string& sec) {
                        read(sec + ".joystick.bindings", BindingSet::Controller)};
     controller_race = {read(sec + ".race", BindingSet::Controller), read(sec + ".wheel.race", BindingSet::Controller),
                        read(sec + ".joystick.race", BindingSet::Controller)};
+    drop_wheel_deadzones();
+    keyboard_menu = read(sec + ".keyboard.bindings", BindingSet::Keyboard);
+    keyboard_race = read(sec + ".keyboard.race", BindingSet::Keyboard);
+    race_custom_on = to_lower(cfg.get(sec, "race_custom").value_or("on")) != "off";
+    menu_custom_on = to_lower(cfg.get(sec, "menu_custom").value_or("on")) != "off";
+}
+
+void PlayerBindings::drop_wheel_deadzones() {
     for (std::optional<Profile>* p : {&controller_menu[1], &controller_race[1]})
         if (*p)
             for (Binding& b : (*p)->bindings)
                 if (b.source.kind == InputSource::Kind::JoyAxis && b.target.kind == PadTarget::Kind::Axis &&
                     b.options.deadzone == kStickDeadzone)
                     b.options.deadzone = 0;
-    keyboard_menu = read(sec + ".keyboard.bindings", BindingSet::Keyboard);
-    keyboard_race = read(sec + ".keyboard.race", BindingSet::Keyboard);
-    race_custom_on = to_lower(cfg.get(sec, "race_custom").value_or("on")) != "off";
-    menu_custom_on = to_lower(cfg.get(sec, "menu_custom").value_or("on")) != "off";
+}
+
+void PlayerBindings::adopt_joystick_sets() {
+    if (controller_menu[1] || controller_race[1]) return;
+    controller_menu[1] = controller_menu[2];
+    controller_race[1] = controller_race[2];
+    drop_wheel_deadzones();
 }
 
 bool PlayerBindings::load_old(const IniDocument& cfg, const std::string& sec) {

@@ -226,6 +226,7 @@ TEST(gtmode_synth_world_loads) {
     CHECK(d.color_rgb(d.color_id(w::kCoupe, 1)) == 0x002020C0);
     CHECK(d.starting_credits() == w::kStartCredits && d.car_wash_price() == 60 && d.wheel_price() == 700);
     CHECK(d.title_idle_seconds == w::kTitleIdleSeconds);
+    CHECK(d.demo_time_limit_seconds == w::kDemoTimeLimitSeconds);
     CHECK(d.catalog.dealers.size() == 3);
     const game::DealerCar* racer = d.catalog.dealer_car("_syn_racer_03");
     CHECK(racer && racer->car == w::kRacer && racer->region == "jp");
@@ -1298,6 +1299,18 @@ TEST(gtmode_synth_race_and_prizes) {
     // Entering race 1: the request GT mode prepared; a day passes.
     choose(f, "Gsyn_e_0001");
     CHECK(page(f) == "r/beginner/gsyn_e_entry");
+    // Its Preview: the computer's race of this event, no day passes, and back on the same item.
+    choose(f, "menu0");
+    std::optional<GameRequest> pv = wait_request(f);
+    CHECK(pv.has_value());
+    if (!pv) return;
+    CHECK(pv->mode == "go_preview" && pv->race_code == "Gsyn_e_0001" && pv->event == "Gsyn_e_0001" && pv->car.empty());
+    CHECK(gt.state().day == 1);
+    GameResult pv_result;
+    pv_result.mode = pv->mode, pv_result.race_code = pv->race_code, pv_result.event = pv->event;
+    finish_game(f, pv_result);
+    CHECK(f.control() == "gt_mode" && page(f) == "r/beginner/gsyn_e_entry" && f.controller()->focus() == 0);
+    CHECK(gt.state().day == 1 && gt.state().races == 0);
     choose(f, "menu1");
     std::optional<GameRequest> r = wait_request(f);
     CHECK(r.has_value());
@@ -2551,6 +2564,28 @@ TEST(gtmode_synth_options_music_list) {
     CHECK(p && p->songs()[0].id == db::id_hash(w::kSongFiles[2]) && changed == 2);
 }
 
+// A list stored on another disc (music §2.3): the page shows this disc's songs, and the options
+// keep the list for the race.
+TEST(gtmode_synth_music_list_from_another_disc) {
+    World world;
+    GameFlow f(world.read, "US");
+    IniDocument cfg;
+    cfg.set("options", "music_playlist", race::RacePlaylist::with_songs({0xA1, 0xA2}, 0x1234).to_text());
+    f.set_options(&cfg, [] {});
+    CHECK(start_title(f) != nullptr);
+    choose(f, "option");
+    settle(f);
+    choose(f, "music");
+    CHECK(f.music_list() != nullptr);
+    if (!f.music_list()) return;
+    const MusicListPage& m = *f.music_list();
+    CHECK(m.rows() == 4);
+    for (int i = 0; i < 3; ++i) CHECK(m.text(i) == std::string(w::kSongTitles[i]) + " / " + w::kSongArtist);
+    const std::optional<race::RacePlaylist> p =
+        race::RacePlaylist::from_text(cfg.get("options", "music_playlist").value_or(""));
+    CHECK(p && p->songs().size() == 3 && p->songs()[0].id == db::id_hash(w::kSongFiles[0]));
+}
+
 // Attract mode: the gcf's idle time on the title starts the demos (cycling the gcf's demo
 // list), five demos, the opening movie, the title again.
 TEST(gtmode_synth_attract_mode) {
@@ -2574,6 +2609,7 @@ TEST(gtmode_synth_attract_mode) {
     if (!r) return;
     CHECK(frames > w::kTitleIdleSeconds * 60 && frames < w::kTitleIdleSeconds * 60 + 60);
     CHECK(r->mode == "attract_demo" && r->page == "root" && r->car.empty());
+    CHECK(r->time_limit_s == w::kDemoTimeLimitSeconds);
     CHECK((r->event == "demo_syn_1" && r->course == "syn_ring") ||
           (r->event == "demo_syn_2" && r->course == "syn_hill"));
     std::vector<std::string> events{r->event};
@@ -2598,6 +2634,40 @@ TEST(gtmode_synth_attract_mode) {
     settle(f);
     // The title idled without a command: back on Arcade.
     CHECK(!f.attract() && page(f) == "root" && f.controller()->focus() == 0);
+}
+
+// What a car comes with (public issue 215): the coupe's slots are mostly empty, which owns
+// the Normal of each. The wagon is FF, the racer RR, and none has a turbo.
+TEST(gtmode_synth_stock_goods) {
+    World world;
+    GameFlow f(world.read, "US");
+    game::GtModeSession* s = start_title(f);
+    CHECK(s != nullptr);
+    if (!s) return;
+    game::GtMode& gt = s->gt();
+    std::optional<game::GarageCar> coupe = gt.make_car(w::kCoupe), wagon = gt.make_car(w::kWagon);
+    std::optional<game::GarageCar> racer = gt.make_car(w::kRacer);
+    CHECK(coupe && wagon && racer);
+    if (!coupe || !wagon || !racer) return;
+    for (int g : {0, 2, 4, 8, 10, 13, 15, 19, 26, 30, 36, 40, 44, 46, 48, 50, 54, 56, 67, 78, 83, 85})
+        CHECK(coupe->owned.test(size_t(g)));
+    CHECK(coupe->owned.count() == 22 && !coupe->owned.test(23)); // no intercooler without a turbo
+    CHECK(!wagon->owned.test(46) && !racer->owned.test(46));     // no driveshaft
+    CHECK(wagon->owned.test(36) && racer->owned.test(36));
+    // A car saved without them (only its bought muffler) gets them back.
+    game::GameState old;
+    old.garage.push_back(*coupe);
+    old.garage[0].owned.reset();
+    old.garage[0].owned.set(37);
+    gt.own_stock_goods(old);
+    CHECK(old.garage[0].owned.test(37) && (old.garage[0].owned & coupe->owned) == coupe->owned);
+    CHECK(old.garage[0].owned.count() == 23);
+    // A car this disc does not have keeps what it has.
+    old.garage[0].car = "no_such_car";
+    old.garage[0].owned.reset();
+    old.garage[0].owned.set(37);
+    gt.own_stock_goods(old);
+    CHECK(old.garage[0].owned.count() == 1);
 }
 
 // The hooks called directly for the branches the walks above do not reach: pre-checks,
@@ -2717,6 +2787,14 @@ TEST(gtmode_synth_hook_branches) {
     res.car_dirt = 0.9;
     const s64 c1 = gt.state().credits;
     CHECK(h.on_result(res).empty());
+    CHECK(gt.state().races == 1 && gt.state().credits == c1 && gt.state().ride_car()->cond.dirt == 0.8f);
+    CHECK(!h.presentation() && !h.next_request());
+    // A Preview is no race of the player's: nothing counted, the ride car as it was (its dirt 0 is the demo's).
+    GameResult pv_res;
+    pv_res.mode = "go_preview";
+    pv_res.race_code = pv_res.event = "Gsyn_e_0001";
+    pv_res.car_dirt = 0;
+    CHECK(h.on_result(pv_res).empty());
     CHECK(gt.state().races == 1 && gt.state().credits == c1 && gt.state().ride_car()->cond.dirt == 0.8f);
     CHECK(!h.presentation() && !h.next_request());
     GameResult lic;
@@ -3100,9 +3178,10 @@ TEST(gtmode_synth_prizes_before_the_replay) {
 }
 
 // Ours: the music list's tabs through the menus with the player's music (race/custom_music.h):
-// none without songs; Original / Custom / Both, each choice kept in [options] music_source and
-// the edit so far in its playlist; Both's two sets back into their own playlists, its Order /
-// Shuffle into [options] music_mix; a song of the player's previewed from its file.
+// none without songs; Custom with songs until a tab is chosen; Original / Custom / Both, each
+// choice kept in [options] music_source and the edit so far in its playlist; Both's two sets back
+// into their own playlists, its Order / Shuffle into [options] music_mix; a song of the player's
+// previewed from its file.
 TEST(gtmode_synth_options_music_tabs) {
     World world;
     GameFlow f(world.read, "US");
@@ -3131,7 +3210,17 @@ TEST(gtmode_synth_options_music_tabs) {
     CHECK(lib.songs().size() == 2);
     choose(f, "music");
     const MusicListPage* m = f.music_list();
-    CHECK(m && m->tabs_shown() && m->tab() == 0 && m->rows() == 4);
+    // No tab chosen yet: Custom, and nothing stored for it.
+    CHECK(m && m->tabs_shown() && m->tab() == 1 && m->rows() == 3 && !cfg.get("options", "music_source"));
+    if (!m) return;
+    // Original: the disc's songs, and the choice stays.
+    press(f, MenuKey::L1);
+    m = f.music_list();
+    CHECK(cfg.get("options", "music_source") == "original" && m && m->tab() == 0 && m->rows() == 4);
+    press(f, MenuKey::Cancel);
+    choose(f, "music");
+    m = f.music_list();
+    CHECK(m && m->tab() == 0);
     if (!m) return;
     // Custom: the player's songs, the cursor on the tabs.
     press(f, MenuKey::R1);

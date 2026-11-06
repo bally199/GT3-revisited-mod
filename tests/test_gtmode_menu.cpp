@@ -1502,6 +1502,11 @@ TEST(gtmode_menu_disc_change_parts_rows) {
     press(f, MenuKey::Cancel);
     CHECK(f.controller()->page_name() == "chg/change_eng");
     CHECK(widget_text(f, "parts_eng_muffler") == "Muffler/Semi-racing");
+    // Normal, which the car has no part record for (public issue 215).
+    choose(f, "status_box_eng1");
+    choose(f, "parts1");
+    press(f, MenuKey::Cancel);
+    CHECK(widget_text(f, "parts_eng_muffler") == "Normal");
 }
 
 TEST(gtmode_menu_disc_attract_mode) {
@@ -1524,6 +1529,7 @@ TEST(gtmode_menu_disc_attract_mode) {
     CHECK(r.has_value() && f.attract());
     if (!r) return;
     CHECK(r->mode == "attract_demo" && r->event.rfind("demo_", 0) == 0 && !r->course.empty());
+    CHECK(r->time_limit_s == 105);
     // Five demos that end on their own, then the opening movie, then the title.
     int demos = 1;
     for (int k = 0; k < 10; ++k) {

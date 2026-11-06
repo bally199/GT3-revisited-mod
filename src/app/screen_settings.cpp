@@ -771,6 +771,19 @@ private:
                    a->save_config();
                });
 
+        Row& sharp = toggle("Sharp cars and prizes in menus",
+                            platform::is_mobile()
+                                ? "Cars and prizes in the menus are drawn at your screen's resolution, except license "
+                                  "cards and trophies. Off: at the game's own 640x448, like the menu art."
+                                : "Cars, trophies and other prizes in the menus are drawn at your screen's resolution. "
+                                  "Off: at the game's own 640x448, like the menu art.",
+                            app.sharp_menu_models(), [a](bool v) {
+                                a->config().set("video", "sharp_menu_models", v ? "on" : "off");
+                                a->save_config();
+                            });
+        sharp.enabled = scale.enabled;
+        if (!sharp.enabled) sharp.desc = msaa.desc;
+
         // [video] heat_haze = on | off (default off; RaceScreen::add_screen_passes)
         Row& haze = toggle("Heat haze in replays",
                            "GT3's heat shimmer over some trackside camera shots in replays, on some courses.",
@@ -780,6 +793,19 @@ private:
                            });
         haze.enabled = scale.enabled;
         if (!haze.enabled) haze.desc = msaa.desc;
+
+        // [video] depth_of_field = off | standard | high (App::depth_of_field)
+        static const char* const kDof[] = {"off", "standard", "high"};
+        const std::string dof = app.depth_of_field();
+        Row& focus = choice("Depth of field in replays",
+                            "GT3's soft focus in replays and demos, on some courses. Standard: GT3's own blur, "
+                            "quick on phones. High: smoother on sharp screens, and much slower on phones.",
+                            {"Off", "Standard", "High"}, dof == "off" ? 0 : dof == "standard" ? 1 : 2, [a](int i) {
+                                a->config().set("video", "depth_of_field", kDof[i]);
+                                a->save_config();
+                            });
+        focus.enabled = scale.enabled;
+        if (!focus.enabled) focus.desc = msaa.desc;
 
         // [video] gpu = auto | gles | gles_driver | 0 (App::init)
         const std::string gpu_cfg = to_lower(cfg.get("video", "gpu").value_or("auto"));
@@ -1000,12 +1026,12 @@ private:
                });
         if (!au.ok()) info("Audio device", "Not available", "No audio output device was found.");
         // Ours ([music] next_race; race/race_audio.h RaceMusic::set_first_song).
-        const bool same = to_lower(app.config().get("music", "next_race").value_or("same")) != "next";
+        const bool same = race::same_song_next_race(app.config().get("music", "next_race").value_or(""));
         choice("Next race starts with",
-               "The same song: a race, a restart or a replay starts with the song the last one ended on, from its "
-               "start. The next song: a new song from the list every time, as GT3 does.",
-               {"The same song", "The next song"}, same ? 0 : 1, [a](int i) {
-                   a->config().set("music", "next_race", i == 1 ? "next" : "same");
+               "The next song: a new song from the list every time, as GT3 does. The same song: a race, a restart or "
+               "a replay starts with the song the last one ended on, from its start.",
+               {"The next song", "The same song"}, same ? 1 : 0, [a](int i) {
+                   a->config().set("music", "next_race", i == 1 ? "same" : "next");
                    a->save_config();
                });
         build_music(app);
@@ -1018,8 +1044,8 @@ private:
         const race::MusicLibrary& lib = app.music_library();
         const std::string folder = app.music_folder();
         const bool chosen = app.music_folder_chosen();
-        const char* formats = "MP3, FLAC and WAV files in it (and its folders) play as race songs beside the game's. "
-                              "Choose them on the Options page's Favorite Music List: Original, Custom or Both.";
+        const char* formats = "MP3, FLAC and WAV files in it (and its folders) play as race songs in place of the game's. "
+                              "Change that on the Options page's Favorite Music List: Original, Custom or Both.";
         // Phones and tablets: the chosen folder by its name (its path is long), the game's as the
         // Files app shows it.
         const bool mobile = platform::is_mobile();
@@ -1315,6 +1341,16 @@ private:
                            a->input().set_keyboard(p, v);
                            a->save_config();
                        });
+            if (!in.keyboard_only(p)) {
+                const float dz = in.steering_deadzone(p);
+                slider(in.wheel_steering(p) ? "Wheel steering dead zone" : "Steering dead zone",
+                       "Races. How far the steering moves off the centre before the car steers. A wheel and other "
+                       "controllers each keep their own.",
+                       dz, 0, InputManager::kSteeringDeadzoneMax, 0.01f, percent(dz), [a, p](float v) {
+                           a->input().set_steering_deadzone(p, v);
+                           a->save_config();
+                       });
+            }
             {
                 const float c = in.steering_curve(p);
                 char text[24];
@@ -1701,7 +1737,7 @@ private:
             apply(n);
         });
         size_t base = rows_.size();
-        toggle("Trigger effects", "DualSense brake resistance, ABS pulse and wheelspin buzz; Xbox impulse triggers.", c.triggers,
+        toggle("Trigger effects", "DualSense brake resistance, ABS pulse and edge-of-grip buzz; Xbox impulse triggers.", c.triggers,
                           [apply, c](bool v) {
                               ForceFeedbackConfig n = c;
                               n.triggers = v;
@@ -1719,16 +1755,40 @@ private:
                               n.wheel = v;
                               apply(n);
                           });
+        static const char* const kWheelModes[] = {"auto", "modern", "gt3"};
+        const int wheel_mode = c.wheel_mode == "gt3" ? 2 : c.wheel_mode == "modern" ? 1 : 0;
+        choice("Wheel force",
+               "Modern: GT3's steering force with a spring that firms up with speed, a kick on impacts and a wheel "
+               "that goes light in understeer. GT3 original: GT3's force alone, over a plain spring.",
+               {"Auto: Modern", "Modern", "GT3 original"}, wheel_mode, [apply, c](int i) {
+                   ForceFeedbackConfig n = c;
+                   n.wheel_mode = kWheelModes[i];
+                   apply(n);
+               });
         slider("Wheel strength", "Overall wheel force (100% = default, up to 200%).", c.strength, 0, 2, 0.05f,
                           percent(c.strength), [apply, c](float v) {
                               ForceFeedbackConfig n = c;
                               n.strength = v;
                               apply(n);
                           });
-        slider("Centring spring", "Self-centring spring of the wheel at speed.", c.spring, 0, 1, 0.05f,
-                          percent(c.spring), [apply, c](float v) {
+        slider("Steering force", "The force from the road and the tyres, 0% for the spring alone.", c.steering, 0, 1,
+                          0.05f, percent(c.steering), [apply, c](float v) {
                               ForceFeedbackConfig n = c;
-                              n.spring = v;
+                              n.steering = v;
+                              apply(n);
+                          });
+        slider("Centring spring",
+               c.gt3_wheel() ? "A plain spring at every speed, as a wheel's own (GT3 sends none), 0% for the force alone."
+                             : "Self-centring spring of the wheel at speed, 0% for the force alone.",
+               c.spring, 0, 1, 0.05f, percent(c.spring), [apply, c](float v) {
+                   ForceFeedbackConfig n = c;
+                   n.spring = v;
+                   apply(n);
+               });
+        slider("Understeer lightening", "How much lighter the wheel goes when the front tyres stop turning the car.",
+                          c.understeer, 0, 1, 0.05f, percent(c.understeer), [apply, c](float v) {
+                              ForceFeedbackConfig n = c;
+                              n.understeer = v;
                               apply(n);
                           });
         toggle("Invert wheel force", "Flip the steering force if your wheel pulls the wrong way.", c.invert,
@@ -1737,10 +1797,12 @@ private:
                               n.invert = v;
                               apply(n);
                           });
-        // base+0 triggers, +1 resistance, +2 wheel, +3 strength, +4 spring, +5 invert.
-        for (size_t i = base; i < base + 6; ++i) rows_[i].enabled = c.enabled;
+        // base+0 triggers, +1 resistance, +2 wheel, +3 mode, +4 strength, +5 steering, +6 spring, +7 understeer, +8 invert.
+        for (size_t i = base; i < base + 9; ++i) rows_[i].enabled = c.enabled;
         if (!c.triggers) rows_[base + 1].enabled = false;
-        if (!c.wheel) rows_[base + 3].enabled = rows_[base + 4].enabled = rows_[base + 5].enabled = false;
+        if (!c.wheel)
+            for (size_t i = base + 3; i < base + 9; ++i) rows_[i].enabled = false;
+        if (c.gt3_wheel()) rows_[base + 7].enabled = false;
         info("Device (player 1)", app.input().device_name(0),
              "Effects are felt while driving.");
     }

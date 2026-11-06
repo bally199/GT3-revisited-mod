@@ -37,6 +37,9 @@ std::string fmt(float v) {
 
 u8 byte01(float v) { return u8(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); }
 
+// An impulse trigger's small motor hardly turns at the bottom of its range, so a level starts above that.
+float impulse_level(float level) { return level > 0 ? 0.3f + 0.7f * std::min(level, 1.0f) : 0.0f; }
+
 // DualSense output report effects block (SDL_SendGamepadEffect payload for
 // PS5 controllers; same layout as SDL's test/testcontroller.c DS5EffectsState_t).
 struct Ds5Effects {
@@ -79,6 +82,10 @@ ForceFeedbackConfig ForceFeedbackConfig::load(const IniDocument& ini) {
     c.strength = parse_float(get("strength"), c.strength, 0.0f, 2.0f);
     c.spring = parse_float(get("spring"), c.spring, 0.0f, 1.0f);
     c.trigger_force = parse_float(get("trigger_force"), c.trigger_force, 0.0f, 1.0f);
+    c.steering = parse_float(get("steering"), c.steering, 0.0f, 1.0f);
+    c.understeer = parse_float(get("understeer"), c.understeer, 0.0f, 1.0f);
+    const std::string mode = to_lower(get("wheel_mode").value_or(c.wheel_mode));
+    if (mode == "modern" || mode == "gt3") c.wheel_mode = mode;
     return c;
 }
 
@@ -86,8 +93,11 @@ void ForceFeedbackConfig::save(IniDocument& ini) const {
     ini.set("ffb", "enabled", enabled ? "on" : "off");
     ini.set("ffb", "triggers", triggers ? "on" : "off");
     ini.set("ffb", "wheel", wheel ? "on" : "off");
+    ini.set("ffb", "wheel_mode", wheel_mode);
     ini.set("ffb", "strength", fmt(strength));
+    ini.set("ffb", "steering", fmt(steering));
     ini.set("ffb", "spring", fmt(spring));
+    ini.set("ffb", "understeer", fmt(understeer));
     ini.set("ffb", "trigger_force", fmt(trigger_force));
     ini.set("ffb", "invert", invert ? "on" : "off");
 }
@@ -115,7 +125,7 @@ TriggerEffect trigger_vibration(float start, int hz, float amplitude) {
 }
 
 TriggerEffect brake_trigger_effect(const ForceFeedbackState& s, const ForceFeedbackConfig& c) {
-    if (!c.enabled || !c.triggers) return trigger_off();
+    if (!c.enabled || !c.triggers || !s.triggers_on) return trigger_off();
     if (s.abs_level > 0) return trigger_vibration(0.1f, 18, s.abs_level); // the ABS under the finger, by its level
     // Firm pedal: resistance builds after the first 20 % of travel. Rolling
     // slowly it's lighter (less brake to feel).
@@ -124,22 +134,42 @@ TriggerEffect brake_trigger_effect(const ForceFeedbackState& s, const ForceFeedb
 }
 
 TriggerEffect throttle_trigger_effect(const ForceFeedbackState& s, const ForceFeedbackConfig& c) {
-    if (!c.enabled || !c.triggers || s.wheelspin <= 0.0f) return trigger_off();
-    return trigger_vibration(0.1f, 35, std::min(s.wheelspin, 1.0f)); // wheelspin buzz, by its amount
+    if (!c.enabled || !c.triggers || !s.triggers_on || s.traction <= 0.0f) return trigger_off();
+    return trigger_vibration(0.1f, 35, std::min(s.traction, 1.0f)); // the edge of grip under the finger, by its level
 }
 
+namespace {
+
+// Modern: the share of the wheel's force left in understeer (its setting takes that much off at full).
+float understeer_left(const ForceFeedbackState& s, const ForceFeedbackConfig& c) {
+    return 1.0f - c.understeer * std::clamp(s.understeer, 0.0f, 1.0f);
+}
+
+} // namespace
+
 int wheel_spring_coefficient(const ForceFeedbackState& s, const ForceFeedbackConfig& c) {
-    if (!c.enabled || !c.wheel) return 0;
-    // Light centring when stopped, full at 120 km/h and above.
-    float k = c.spring * (0.15f + 0.85f * std::clamp(s.speed_kmh / 120.0f, 0.0f, 1.0f));
+    if (!c.enabled || !c.wheel || !s.wheel_on) return 0;
+    float k = c.spring;
+    if (!c.gt3_wheel()) {
+        // Light centring when stopped, full at 120 km/h and above; a spring ignores the tyres, so it goes
+        // with the steering force in understeer and out of the way of opposite lock in a slide.
+        k *= 0.15f + 0.85f * std::clamp(s.speed_kmh / 120.0f, 0.0f, 1.0f);
+        k *= std::min(understeer_left(s, c), 1.0f - std::clamp(s.oversteer, 0.0f, 1.0f));
+    }
     return int(std::lround(std::clamp(k * c.strength, 0.0f, 1.0f) * 32767.0f));
 }
 
 int wheel_constant_level(const ForceFeedbackState& s, const ForceFeedbackConfig& c) {
-    if (!c.enabled || !c.wheel) return 0;
-    float f = std::clamp(s.steer_force, -1.0f, 1.0f) + std::clamp(s.jolt, 0.0f, 1.0f) * (s.steer_force < 0 ? -0.5f : 0.5f);
+    if (!c.enabled || !c.wheel || !s.wheel_on) return 0;
+    float f = std::clamp(s.steer_force, -1.0f, 1.0f);
+    if (!c.gt3_wheel()) f = f * understeer_left(s, c) + std::clamp(s.jolt, 0.0f, 1.0f) * (s.steer_force < 0 ? -0.5f : 0.5f);
     if (c.invert) f = -f;
-    return int(std::lround(std::clamp(f * c.strength, -1.0f, 1.0f) * 32767.0f));
+    return int(std::lround(std::clamp(f * c.steering * c.strength, -1.0f, 1.0f) * 32767.0f));
+}
+
+float eased_indicator(float felt, float indicator, float dt) {
+    constexpr float kSeconds = 0.25f; // no step above 6 % a tick on CPU laps of Trial Mountain and Laguna Seca
+    return felt + (std::clamp(indicator, 0.0f, 1.0f) - felt) * std::clamp(dt / kSeconds, 0.0f, 1.0f);
 }
 
 Ds5Packet ds5_trigger_packet(const TriggerEffect& left, const TriggerEffect& right, u8 low, u8 high, bool improved) {
@@ -162,12 +192,15 @@ Ds5Packet ds5_trigger_packet(const TriggerEffect& left, const TriggerEffect& rig
     return out;
 }
 
+// A throb, not on and off: the motor needs longer than a short pulse to spin up, and stopped it would start again from
+// nothing. (Nor does SDL's Raw Input driver then move the pad's motors between XInput and WGI at every pulse.)
 float impulse_brake(const ForceFeedbackState& s, double t) {
-    if (s.abs_level <= 0) return 0.0f;
-    return std::fmod(t * 16.0, 1.0) < 0.5 ? 0.8f * std::min(s.abs_level, 1.0f) : 0.0f; // ~16 Hz square pulse
+    if (!s.triggers_on) return 0.0f;
+    const float level = impulse_level(s.abs_level);
+    return std::fmod(t * 10.0, 1.0) < 0.5 ? level : 0.4f * level;
 }
 
-float impulse_throttle(const ForceFeedbackState& s) { return 0.5f * std::clamp(s.wheelspin, 0.0f, 1.0f); }
+float impulse_throttle(const ForceFeedbackState& s) { return s.triggers_on ? impulse_level(s.traction) : 0.0f; }
 
 } // namespace ffb
 
@@ -220,7 +253,7 @@ void ForceFeedback::apply(SDL_JoystickID id, SDL_Gamepad* gamepad, SDL_Joystick*
             }
         } else if ((brake_trigger >= 0 || throttle_trigger >= 0) && cfg_.triggers) {
             // Xbox One/Series impulse triggers (no-op on pads without them): the ABS on the brake's trigger, the
-            // wheelspin on the throttle's.
+            // edge of grip on the throttle's.
             auto level = [&](int axis) {
                 if (axis == brake_trigger) return ffb::impulse_brake(s, time);
                 if (axis == throttle_trigger) return ffb::impulse_throttle(s);
@@ -234,7 +267,15 @@ void ForceFeedback::apply(SDL_JoystickID id, SDL_Gamepad* gamepad, SDL_Joystick*
         }
         return;
     }
-    if (joystick && cfg_.wheel) apply_wheel(d, joystick, s, resumed);
+    if (joystick && cfg_.wheel) {
+        if (resumed) d.understeer = d.oversteer = 0, d.eased_at = time;
+        ForceFeedbackState felt = s;
+        const float dt = float(time - d.eased_at);
+        felt.understeer = d.understeer = ffb::eased_indicator(d.understeer, s.understeer, dt);
+        felt.oversteer = d.oversteer = ffb::eased_indicator(d.oversteer, s.oversteer, dt);
+        d.eased_at = time;
+        apply_wheel(d, joystick, felt, resumed);
+    }
 }
 
 namespace {
@@ -278,6 +319,18 @@ bool ForceFeedback::drives_wheel(SDL_JoystickID id) const {
     return false;
 }
 
+bool ForceFeedback::has_wheel_forces(SDL_Joystick* joystick) {
+    if (!SDL_IsJoystickHaptic(joystick) || !SDL_InitSubSystem(SDL_INIT_HAPTIC)) return false;
+    bool forces = false;
+    if (SDL_Haptic* h = SDL_OpenHapticFromJoystick(joystick)) {
+        const Uint32 features = SDL_GetHapticFeatures(h);
+        forces = (features & SDL_HAPTIC_SPRING) && (features & SDL_HAPTIC_CONSTANT);
+        SDL_CloseHaptic(h);
+    }
+    SDL_QuitSubSystem(SDL_INIT_HAPTIC);
+    return forces;
+}
+
 void ForceFeedback::apply_wheel(Dev& d, SDL_Joystick* joystick, const ForceFeedbackState& s, bool restart) {
     if (!d.haptic && !d.haptic_tried) {
         d.haptic_tried = true;
@@ -290,7 +343,9 @@ void ForceFeedback::apply_wheel(Dev& d, SDL_Joystick* joystick, const ForceFeedb
         Uint32 features = SDL_GetHapticFeatures(d.haptic);
         LOG_INFO("Force feedback: %s (spring %s, constant %s)", SDL_GetHapticName(d.haptic),
                  (features & SDL_HAPTIC_SPRING) ? "yes" : "no", (features & SDL_HAPTIC_CONSTANT) ? "yes" : "no");
-        if (features & SDL_HAPTIC_AUTOCENTER) SDL_SetHapticAutocenter(d.haptic, 0); // we centre ourselves
+        // We centre ourselves, in GT3 original too: GT3 leaves a Logitech wheel's own spring on, but only the
+        // spring effect plays the same on every wheel (SDL's DirectInput open turns a wheel's own off).
+        if (features & SDL_HAPTIC_AUTOCENTER) SDL_SetHapticAutocenter(d.haptic, 0);
         if (features & SDL_HAPTIC_SPRING) d.spring_id = start_effect(d.haptic, wheel_spring(0), "spring");
         if (features & SDL_HAPTIC_CONSTANT) d.constant_id = start_effect(d.haptic, wheel_constant(0), "constant force");
     } else if (restart && d.haptic) {

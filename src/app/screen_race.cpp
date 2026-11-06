@@ -161,8 +161,9 @@ void RaceScreen::on_event(App& app, const SDL_Event& e) {
 // Phones: driving touch controls while racing, menu controls otherwise (the quick menus
 // run over the race stage: a GT race's field behind them is not a replay).
 TouchLayout RaceScreen::touch_layout() const {
-    // (A demonstration plays like a replay: the menu buttons end it.)
-    return stage_ == Stage::Drive && !paused_ && !replaying_ && !demo_ && !quick_ ? TouchLayout::Driving : TouchLayout::Menu;
+    // (A demonstration plays like a replay, the Preview is the computer's: the menu buttons end them.)
+    return stage_ == Stage::Drive && !paused_ && !replaying_ && !demo_ && !race_preview_ && !quick_ ? TouchLayout::Driving
+                                                                                                     : TouchLayout::Menu;
 }
 
 bool RaceScreen::follows_aspect() const {
@@ -209,7 +210,9 @@ void RaceScreen::render_loading(App& app, Ui& ui) {
     if (!loading_.valid()) return;
     SDL_Texture* prev = SDL_GetRenderTarget(r);
     SDL_SetRenderTarget(r, loading_.frame);
-    for (int i = 0; i < frames; ++i) loading_.transition.draw_frame(r, SDL_FRect{0, 0, 640, 448});
+    float fw = 640, fh = 448; // (the picture of a page with a 3D model is larger)
+    SDL_GetTextureSize(loading_.frame, &fw, &fh);
+    for (int i = 0; i < frames; ++i) loading_.transition.draw_frame(r, SDL_FRect{0, 0, fw, fh});
     SDL_SetRenderTarget(r, prev);
     const UiRect pic = ui.picture43(); // the menu's 4:3 picture in the middle
     const SDL_FRect dst{pic.x, pic.y, pic.w, pic.h};
@@ -284,12 +287,14 @@ void RaceScreen::init(App& app) {
     // Ours: the player's own songs, from the Options music list's Original / Custom / Both.
     music_.set_custom(&app.music_library(), race::parse_music_source(app.config().get("options", "music_source").value_or("")),
                       app.config().get("options", "music_mix").value_or("shuffle") != "order");
-    // Ours, [music] next_race = same (the default): the run starts with the song the last one
-    // ended on, from its start; next: a new song, as GT3 takes one every run.
-    if (app.config().get("music", "next_race").value_or("same") != "next")
+    // Ours, [music] next_race = same: the run starts with the song the last one ended on, from
+    // its start; otherwise a new song, as GT3 takes one every run (music §2.1).
+    if (race::same_song_next_race(app.config().get("music", "next_race").value_or("")))
         music_.set_first_song(app.config().get("music", "race_song").value_or(""));
     rumble_on_ = menu::flow::option_value(&app.config(), "vib1") != "off";
     rumble2_on_ = menu::flow::option_value(&app.config(), "vib2") != "off";
+    wheel_force_on_ = menu::flow::option_value(&app.config(), "force_feedback_1p") != "off";
+    wheel_force2_on_ = menu::flow::option_value(&app.config(), "force_feedback_2p") != "off";
     // Options (the original's options record): race / replay SE, ghost, wide mode (2P split).
     race_se_ = menu::flow::option_value(&app.config(), "race_se") != "off";
     replay_se_ = menu::flow::option_value(&app.config(), "replay_se") != "off";
