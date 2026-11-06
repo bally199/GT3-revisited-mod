@@ -204,6 +204,9 @@ void RaceScreen::render_loading(App& app, Ui& ui) {
     }
     const u64 now = SDL_GetTicksNS();
     const int frames = loading_drawn_ ? menu::flow::LoadingPicture::frames_for(now - loading_ns_) : 1;
+    if (!loading_drawn_)
+        LOG_INFO("Race: loading picture (%s, transition at frame %d)", loading_.valid() ? "the menu's" : "none",
+                 loading_.valid() ? loading_.transition.frames() : -1);
     loading_ns_ = now;
     loading_drawn_ = true;
     ui.fill(0, 0, ui.width(), ui.height(), Color{0, 0, 0, 255});

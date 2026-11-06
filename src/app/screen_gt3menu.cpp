@@ -501,7 +501,11 @@ private:
         for (Message& m : messages_) --m.frames;
         messages_.erase(std::remove_if(messages_.begin(), messages_.end(), [](const Message& m) { return m.frames <= 0; }),
                         messages_.end());
-        if (auto t = flow_->take_transition()) transition_.start(*t);
+        if (auto t = flow_->take_transition()) {
+            transition_.start(*t);
+            transition_ns_ = SDL_GetTicksNS();
+            LOG_INFO("gt3menu: transition %d starts", int(*t));
+        }
         if (auto mv = flow_->take_movie()) start_movie(app, *mv);
         if (auto m = flow_->take_music()) {
             menu_music_ = *m;
@@ -571,6 +575,9 @@ private:
         std::snprintf(buf, sizeof(buf), "start race: %s code=%s course=%s car=%s", r.mode.c_str(),
                       r.race_code.c_str(), r.course.c_str(), r.car.c_str());
         LOG_INFO("gt3menu: %s", buf);
+        if (transition_.active())
+            LOG_INFO("gt3menu: race handed the transition after %d frames, %.0f ms", transition_.frames(),
+                     double(SDL_GetTicksNS() - transition_ns_) / 1e6);
         messages_.push_back({buf, 300});
         if (const menu::flow::GtModeWidgetRelease& release = menu::flow::gt_mode_widget_release()) release(app);
         // The race keeps this frame and its transition on screen while it loads (menus §6);
@@ -624,6 +631,9 @@ private:
             SDL_SetRenderTarget(r, picture);
             for (; pending_draws_ > 0; --pending_draws_) transition_.draw_frame(r, SDL_FRect{0, 0, w, h});
         } else {
+            if (transition_.active())
+                LOG_INFO("gt3menu: transition over after %d frames, %.0f ms", transition_.frames(),
+                         double(SDL_GetTicksNS() - transition_ns_) / 1e6);
             transition_.stop();
             pending_draws_ = 0;
             SDL_SetRenderTarget(r, frame_);
@@ -643,6 +653,7 @@ private:
     std::unique_ptr<GameFlow> flow_;
     MenuSounds sounds_;
     ScreenTransition transition_;
+    u64 transition_ns_ = 0; // when transition_ started (for the log)
     video::MoviePlayer movie_;
     std::string movie_path_;
     // Course / class preview stills (stream/course.ipic), as textures.
