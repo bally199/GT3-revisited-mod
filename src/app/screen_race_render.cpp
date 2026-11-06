@@ -1004,7 +1004,17 @@ std::vector<CarLampGlows::Car> RaceScreen::lamp_cars() const {
     std::vector<CarLampGlows::Car> out;
     auto add = [&](const CarVisual* v, const sim::VehicleState& s, const sim::VehicleSetup& su, size_t idx) {
         if (!v || v->lamps().empty()) return;
-        out.push_back({&v->lamps(), v->body_matrix(s, su), brake_lamps_.factor(idx), brake_lamps_.now(idx)});
+        CarLampGlows::Car c{&v->lamps(), v->body_matrix(s, su), brake_lamps_.factor(idx), brake_lamps_.now(idx)};
+        // The body box that hides the other cars' lamps (car frame: nose -Z, ground at 0), a
+        // little inside the car's extents (sills to below the roof line), so lamps beside or
+        // above it still show.
+        if (su.width > 0.5f && su.height > 0.5f && su.cog_front_extent + su.cog_rear_extent > 1.0f) {
+            c.box = true;
+            const float hw = 0.45f * su.width;
+            c.box_lo = {-hw, 0.25f, su.cog_offset.z - su.cog_front_extent + 0.1f};
+            c.box_hi = {hw, 0.85f * su.height, su.cog_offset.z + su.cog_rear_extent - 0.1f};
+        }
+        out.push_back(c);
     };
     add(car_visual_.get(), render_state_, vehicle_->setup(), 0);
     if (field_ && field_->has_second())

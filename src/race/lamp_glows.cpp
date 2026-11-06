@@ -386,6 +386,40 @@ void CarLampGlows::add(render::ScreenBatch& b, const SDL_FRect& rect, const rend
                             m.at(2, 0) * d.x + m.at(2, 1) * d.y + m.at(2, 2) * d.z};
     };
     int kept = 0;
+    // A segment through another car's body box (in its model frame: the model is a rotation and
+    // a translation).
+    auto through = [](const Car& c, const render::Vec3& a, const render::Vec3& b) {
+        const render::Mat4& m = c.model;
+        const render::Vec3 t{m.at(0, 3), m.at(1, 3), m.at(2, 3)};
+        auto local = [&](const render::Vec3& p) {
+            const render::Vec3 d = p - t;
+            return render::Vec3{m.at(0, 0) * d.x + m.at(1, 0) * d.y + m.at(2, 0) * d.z,
+                                m.at(0, 1) * d.x + m.at(1, 1) * d.y + m.at(2, 1) * d.z,
+                                m.at(0, 2) * d.x + m.at(1, 2) * d.y + m.at(2, 2) * d.z};
+        };
+        const render::Vec3 p = local(a), q = local(b);
+        const float o[3] = {p.x, p.y, p.z}, d[3] = {q.x - p.x, q.y - p.y, q.z - p.z};
+        const float lo[3] = {c.box_lo.x, c.box_lo.y, c.box_lo.z}, hi[3] = {c.box_hi.x, c.box_hi.y, c.box_hi.z};
+        float t0 = 0, t1 = 1;
+        for (int i = 0; i < 3; ++i) {
+            if (std::fabs(d[i]) < 1e-6f) {
+                if (o[i] < lo[i] || o[i] > hi[i]) return false;
+                continue;
+            }
+            float u = (lo[i] - o[i]) / d[i], v = (hi[i] - o[i]) / d[i];
+            if (u > v) std::swap(u, v);
+            t0 = std::max(t0, u), t1 = std::min(t1, v);
+            if (t0 > t1) return false;
+        }
+        return true;
+    };
+    const Car* self = nullptr; // the car whose lamps are being placed
+    const Blocked hidden = [&](const render::Vec3& a, const render::Vec3& b) {
+        if (blocked && blocked(a, b)) return true;
+        for (const Car& c : cars)
+            if (&c != self && c.box && through(c, a, b)) return true;
+        return false;
+    };
     // `glow`: head and brake lamps (tail lamps only ever get the halo); `I` the brake factor.
     auto lamp = [&](const Car& car, const CarLampRecord& l, bool glow, float I) {
         if (kept >= 100) return;
@@ -428,7 +462,7 @@ void CarLampGlows::add(render::ScreenBatch& b, const SDL_FRect& rect, const rend
         float px = fr.screen_x(gv.x, z, rect.x, rect.w), py = fr.screen_y(gv.y, z, rect.y, rect.h);
         float per_m = fr.per_metre(zp, rect.h);
         if (D >= 0) {
-            float vis = box_visibility(tpx, tpy, tz, rect, fr, view, eye, blocked);
+            float vis = box_visibility(tpx, tpy, tz, rect, fr, view, eye, hidden);
             float k = D * I;
             if (vis > 0 && k > 0 && !flare_.empty()) {
                 flare_.add(b, fr, rect, gv.x * f, gv.y * f, zp, ty.glow * l.a, {col[0] * k, col[1] * k, col[2] * k}, vis);
@@ -449,7 +483,7 @@ void CarLampGlows::add(render::ScreenBatch& b, const SDL_FRect& rect, const rend
             hy = ty.halo * l.b;
         }
         if (ty.halo_gain > 0 && z > 1 && (hx * per_m > 0.5f || hy * per_m > 0.5f) &&
-            !blocked(eye, eye + (car.model.transform_point(l.pos) - eye) * f)) {
+            !hidden(eye, eye + (car.model.transform_point(l.pos) - eye) * f)) {
             const float k = ty.halo_gain * 0.5f;
             Flare::add_mesh(Flare::disc_mesh(), b, fr, rect, gv.x * f, gv.y * f, zp, hx, hy,
                             {col[0] * k, col[1] * k, col[2] * k}, 1.0f);
@@ -457,6 +491,7 @@ void CarLampGlows::add(render::ScreenBatch& b, const SDL_FRect& rect, const rend
     };
     for (const Car& car : cars) {
         if (!car.lamps) continue;
+        self = &car;
         for (const CarLampRecord& l : car.lamps->head) lamp(car, l, true, 1.0f);
         if (car.k > 0)
             for (const CarLampRecord& l : car.lamps->brake) {

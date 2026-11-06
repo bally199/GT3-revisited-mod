@@ -154,6 +154,11 @@ public:
         render::Mat4 model; // car (model) frame -> world
         float k = 0;        // lamp factor k/4
         bool brake_now = false;
+        // The body as a box in the model frame (box_lo..box_hi; box false: none): it hides the
+        // other cars' lamps behind it. GT3 tests the lamps against the course only, so a car's
+        // headlamps glowed through the car in front.
+        bool box = false;
+        render::Vec3 box_lo, box_hi;
     };
     using Blocked = LampGlows::Blocked;
     // As LampGlows::add / draw.
