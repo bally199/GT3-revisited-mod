@@ -19,6 +19,9 @@
 #include "render/showroom.h"
 #include "sim/car_spec.h"
 #include "render/view3d.h"
+#if GT3R_UWP && GT3R_GLES
+#include "render/gpu_gles.h"
+#endif
 #include "vfs/vfs.h"
 #include "base/file.h"
 #include "formats/png_writer.h"
@@ -158,7 +161,9 @@ private:
     // read back from the 2D renderer's targets (<path>-<frame>-<step>.png), for frames
     // first..first+count-1 counted from the first showroom frame.
     // GT3R_SHOWROOM=<bits>: 1 one pass (no jitter scratch target), 2 no floor mirror, 4 no W - B
-    // composite (the car over black copied onto the page), 8 the 4 jitter passes on Xbox.
+    // composite (the car over black copied onto the page), 8 the 4 jitter passes on Xbox, 16 the
+    // jitter scratch target cleared before each pass, 32 a glFinish after each jitter step, 64 a
+    // scratch target per jitter pass.
     struct Capture2D {
         bool parsed = false;
         int first = 0, count = 0, frames = 0, last = -1, bits = 0;
@@ -364,9 +369,17 @@ private:
         auto jittered = [&](SDL_Renderer* rr, SDL_Texture* target, int w, int h, int n, auto&& draw_pass) {
             static const float kJ2[2][2] = {{0.25f, 0.75f}, {0.75f, 0.25f}};
             static const float kJ4[4][2] = {{0.375f, 0.25f}, {0.125f, 0.75f}, {0.875f, 0.25f}, {0.625f, 0.75f}};
-            SDL_Texture*& tmp = targets_for(pass_tex_, w, h).black;
-            if (n > 1 && !tmp) tmp = SDL_CreateTexture(rr, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, w, h);
-            if (!tmp) n = 1;
+            SDL_Texture*& tmp0 = targets_for(pass_tex_, w, h).black;
+            if (n > 1 && !tmp0) tmp0 = SDL_CreateTexture(rr, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, w, h);
+            if (!tmp0) n = 1;
+            // Diagnostics (GT3R_SHOWROOM, Xbox): 64 a scratch target of its own for each pass.
+            SDL_Texture* own[4] = {};
+            if ((cap2d_.bits & 64) && n > 1)
+                for (int i = 1; i < n && i < 4; ++i) {
+                    auto& extra = jitter_extra_[{w * 4 + i, h}];
+                    if (!extra) extra = SDL_CreateTexture(rr, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, w, h);
+                    own[i] = extra;
+                }
             const float px = 0.6f * float(w) / 640.0f, py = 0.6f * float(h) / 448.0f;
             for (int i = 0; i < n; ++i) {
                 const float* j = n == 4 ? kJ4[i] : n == 2 ? kJ2[i] : nullptr;
@@ -379,12 +392,23 @@ private:
                     draw_pass(pj);
                     continue;
                 }
+                SDL_Texture* tmp = own[i < 4 ? i : 0] ? own[i] : tmp0;
                 SDL_SetRenderTarget(rr, tmp);
+                if (cap2d_.bits & 16) { // diagnostics: the scratch target cleared first
+                    SDL_SetRenderDrawColor(rr, 0, 0, 0, 0);
+                    SDL_RenderClear(rr);
+                }
                 draw_pass(pj);
                 SDL_SetRenderTarget(rr, target);
                 SDL_SetTextureBlendMode(tmp, SDL_BLENDMODE_BLEND);
                 SDL_SetTextureAlphaModFloat(tmp, 1.0f / float(i + 1));
                 SDL_RenderTexture(rr, tmp, nullptr, nullptr);
+#if GT3R_UWP && GT3R_GLES
+                if (cap2d_.bits & 32) { // diagnostics: each step finished on the GPU before the next
+                    SDL_FlushRenderer(rr);
+                    render::gles::finish();
+                }
+#endif
             }
         };
         const int mirror_passes = passes <= 2 || fade < 0.8f ? 1 : 2;
@@ -826,6 +850,7 @@ private:
     std::map<std::string, ShowroomCamera> cameras_;
     std::unique_ptr<render::PrizeView> prize_;
     std::map<std::pair<int, int>, Targets> pass_tex_; // multi-pass scratch targets (in .black)
+    std::map<std::pair<int, int>, SDL_Texture*> jitter_extra_; // GT3R_SHOWROOM bit 64 (diagnostics)
     int frame_ = 0; // App::frame of this draw
     std::string prize_path_;
     int prize_serial_ = -1, prize_skip_ = -1;

@@ -45,6 +45,8 @@ double frame_fence();
 // The GPU time of the passes and blits of a recent frame, in ms (Xbox: time-elapsed queries,
 // read a few frames late); -1 when not measured.
 double gpu_ms();
+// glFinish (diagnostics).
+void finish();
 // Draws without glDrawElementsInstancedBaseVertex from now on (GpuOptions::base_vertex).
 void disable_base_vertex();
 // Diagnostic probes: SDL_GPUDevice::probe in gpu_gles.cpp ([video] gles_probe, GT3R_GLES_PROBE).

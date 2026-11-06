@@ -905,6 +905,12 @@ void set_probe(int bits) {
 
 double gpu_ms() { return g_device ? g_device->gpu_ms : -1; }
 
+void finish() {
+    if (!g_device || !g_device->renderer) return;
+    begin_gl(g_device);
+    glFinish();
+}
+
 double frame_fence() {
     if (!g_device || !g_device->renderer) return 0;
     begin_gl(g_device);
