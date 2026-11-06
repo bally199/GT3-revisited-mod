@@ -372,6 +372,24 @@ size is sixteen times the memory). Textures the game rewrites as it runs (a few
 animated ones) keep their originals. The 2D menus, the HUD and the movies are
 not covered.
 
+## HD movies
+
+A movie's pictures can come from an MPEG-1/2 video stream of any size and frame
+rate, its sound still from the disc: for `stream/opening.pss`, a mod's
+`files/stream/opening.pss.m2v`, or `opening.pss.m2v` in `movies_hd/` in the data
+folder. The stream starts with the movie and plays at its own rate, so a
+deinterlaced 50 / 60 fps stream of a field-split movie (two field pictures
+stacked in each frame, `src/video/field_layout.h`) plays as such.
+
+Settings → Video → **Dump movies** copies the disc's movies into `movie_dump/`
+in the data folder, with `movies.txt` giving each one's layout (`fields` or
+`frames`), size and frame rate. With ffmpeg, a field-split movie becomes
+ordinary interlaced frames with `il=l=i:c=i,setfield=tff` and progressive
+pictures at the field rate with `bwdif=mode=send_field`.
+
+The pictures are decoded on the CPU: a larger stream costs more (a phone or the
+Xbox is fine with twice the original size).
+
 ## Planned
 
 - **Data patches**: small text files that change individual database

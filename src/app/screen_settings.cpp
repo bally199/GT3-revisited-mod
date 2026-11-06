@@ -732,6 +732,16 @@ private:
                    a->apply_texture_packs();
                });
 
+        // HD movies (docs/MODDING.md): the disc's movies into movie_dump/ (App::dump_movies)
+        {
+            const std::string status = app.movie_dump_status();
+            action("Dump movies",
+                   "Copy the disc's movies into the movie_dump folder of the data folder, for making HD "
+                   "movies (about 1 GB; it runs in the background)." +
+                       (status.empty() ? std::string() : " " + status + "."),
+                   "", [a] { a->dump_movies(); });
+        }
+
         // [video] replay_look = on | off (default off; RaceScreen::apply_depth_of_field)
         toggle("Replay look while racing",
                "The replays' depth of field (focused on your car in the outside views) and, on the courses "

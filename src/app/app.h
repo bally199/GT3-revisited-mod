@@ -16,6 +16,8 @@
 #include "vfs/vfs.h"
 #include "xr/xr_session.h"
 
+#include <atomic>
+#include <thread>
 #include <SDL3/SDL.h>
 
 #include <functional>
@@ -98,6 +100,11 @@ public:
     // [video] texture_dump and <data>/textures/ (HD texture packs) to the 3D renderer; again after
     // either changes (the textures already loaded keep theirs until reloaded).
     void apply_texture_packs();
+    // HD movies (docs/MODDING.md): the disc's movies (stream/*.pss) copied into
+    // <data>/movie_dump/ on a worker thread, with movies.txt naming each one's layout ("fields":
+    // two field pictures stacked per frame; "frames": progressive). Status: movie_dump_status().
+    void dump_movies();
+    std::string movie_dump_status() const;
     void set_replay_30fps(bool on);
     void request_half_rate() { half_request_ = true; }
     void set_limit_60fps(bool on);
@@ -307,6 +314,8 @@ private:
     // The main loop rate set by App::apply_frame_limit (0: as fast as vsync allows).
     double frame_limit_rate_ = 0;
     bool half_request_ = false, half_rate_ = false; // request_half_rate(): this frame's ask; in force
+    std::thread movie_dump_;
+    std::atomic<int> movie_dump_done_{0}, movie_dump_total_{-1}; // -1: not started
     void apply_half_rate();
     void apply_frame_limit();
     // [video] gamma, and its pass while it is not 1 (destroyed before gpu_).

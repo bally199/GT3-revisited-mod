@@ -39,6 +39,11 @@ public:
     // Probes the start of the stream (sequence header, audio header).
     // Throws FormatError if no MPEG video is found.
     Movie(ReadFn read, u64 size);
+    // The same movie with its pictures from an MPEG-1/2 elementary stream (`video`, an HD
+    // replacement: docs/MODDING.md "HD movies") and its sound from the PSS. The pictures take
+    // the PSS's first video time and the stream's own frame rate (a deinterlaced, 50 / 60 fps
+    // stream plays at that rate). Throws FormatError when the stream has no sequence header.
+    Movie(ReadFn read, u64 size, ReadFn video, u64 video_size);
     ~Movie();
 
     const MovieInfo& info() const { return info_; }
@@ -73,13 +78,22 @@ private:
 
     bool audio_enabled_ = true;
     bool video_enabled_ = true;
+    // The HD replacement stream (es_read_ non-null): the PSS's own video is dropped.
+    ReadFn es_read_;
+    u64 es_size_ = 0, es_pos_ = 0;
+    u32 es_frames_ = 0;
     Bytes audio_fifo_;
     u64 audio_fifo_base_ = 0; // ADS-file offset of audio_fifo_[0]
     std::unique_ptr<AdsStream> audio_;
 };
 
 // Opens a movie through the VFS (Vfs::open_stream): disc files and files
-// provided by mods both stream with ranged reads. Throws FormatError.
+// provided by mods both stream with ranged reads. Throws FormatError. An HD
+// replacement for its pictures (Movie's second constructor) is taken from
+// <path>.m2v in the VFS (a mod's files/), else <file name>.m2v in the folder
+// set_hd_movie_folder names.
 std::unique_ptr<Movie> open_movie(Vfs& vfs, const std::string& path);
+// The folder of HD movie streams outside the mods (App: <data>/movies_hd/); empty: none.
+void set_hd_movie_folder(const std::string& folder);
 
 } // namespace gt3r::video

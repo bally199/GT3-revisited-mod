@@ -18,6 +18,8 @@
 #include "platform/render_scale.h"
 #include "platform/mac_layer.h"
 #include "video/movie_player.h"
+#include "video/field_layout.h"
+#include "video/movie.h"
 
 #include <algorithm>
 #include <atomic>
@@ -575,7 +577,61 @@ void App::apply_texture_packs() {
     if (!gpu_) return;
     const bool dump = to_lower(config_.get("video", "texture_dump").value_or("off")) == "on";
     host_make_dir(data_dir_ + "textures");
+    host_make_dir(data_dir_ + "movies_hd"); // HD movies outside the mods (video::open_movie)
+    video::set_hd_movie_folder(data_dir_ + "movies_hd");
     gpu_->set_texture_packs(dump ? data_dir_ + "texture_dump" : std::string(), {data_dir_ + "textures"});
+}
+
+void App::dump_movies() {
+    if (!vfs_ || (movie_dump_.joinable() && movie_dump_done_ < movie_dump_total_)) return;
+    if (movie_dump_.joinable()) movie_dump_.join();
+    std::vector<std::string> names;
+    for (const std::string& n : vfs_->list_dir("stream"))
+        if (n.size() > 4 && to_lower(n.substr(n.size() - 4)) == ".pss") names.push_back(n);
+    movie_dump_done_ = 0;
+    movie_dump_total_ = int(names.size());
+    const std::string dir = data_dir_ + "movie_dump/";
+    host_make_dir(dir);
+    LOG_INFO("Movie dump: %zu movies to %s", names.size(), dir.c_str());
+    movie_dump_ = std::thread([this, names, dir] {
+        std::string manifest = "# GT3 Revisited movie dump: <file> <fields|frames> <width>x<height> <fps>\n";
+        for (const std::string& name : names) {
+            const std::string path = "stream/" + name;
+            try {
+                auto in = vfs_->open_stream(path);
+                if (!in) throw FormatError("not found");
+                Bytes all(size_t(in->size));
+                for (u64 at = 0; at < in->size;) {
+                    const size_t n = size_t(std::min<u64>(4u << 20, in->size - at));
+                    in->read(at, all.data() + at, n);
+                    at += n;
+                }
+                write_host_file(dir + name, all);
+                // The layout, as the player decides it (field_layout.h), from the first pictures.
+                video::Movie m([&all](u64 o, void* out, size_t len) { std::memcpy(out, all.data() + o, len); }, all.size());
+                m.set_audio_enabled(false);
+                video::FieldLayoutDetector d;
+                video::Frame f;
+                for (int i = 0; i < 120 && !d.decided() && m.next_frame(f); ++i) d.add(f);
+                char line[256];
+                std::snprintf(line, sizeof line, "%s %s %dx%d %.3f\n", name.c_str(), d.field_split() ? "fields" : "frames",
+                              m.info().width, m.info().height, m.info().frame_rate);
+                manifest += line;
+            } catch (const std::exception& e) {
+                LOG_WARN("Movie dump: %s: %s", name.c_str(), e.what());
+            }
+            ++movie_dump_done_;
+        }
+        write_host_file(dir + "movies.txt", ByteSpan(reinterpret_cast<const u8*>(manifest.data()), manifest.size()));
+        LOG_INFO("Movie dump: done (%d movies)", movie_dump_total_.load());
+    });
+}
+
+std::string App::movie_dump_status() const {
+    const int total = movie_dump_total_, done = movie_dump_done_;
+    if (total < 0) return "";
+    if (done < total) return std::to_string(done) + " of " + std::to_string(total) + " copied";
+    return "Done: " + std::to_string(total) + " movies in movie_dump";
 }
 
 bool App::replay_30fps() const {
@@ -1505,6 +1561,7 @@ bool App::show_song() const { return to_lower(config_.get("music", "show_song").
 
 void App::shutdown() {
     music_.cancel(); // a folder scan's thread reads files through SDL
+    if (movie_dump_.joinable()) movie_dump_.join();
     remember_race_scale();
     if (input_) save_config();
     screens_.clear();
