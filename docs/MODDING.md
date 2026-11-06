@@ -360,6 +360,9 @@ involved:
    loads lands in `texture_dump/` in the data folder, named by its size and
    contents (`256x128_0123456789abcdef.png`). Visit the courses and cars you
    want covered; textures already dumped are not written again.
+   **Dump all textures** (the same page) does that for the whole disc: it turns
+   the dump on and builds every course and every car model (day, evening and
+   night, in each paint) once, a few minutes in the background.
 2. Make your versions under the same names (an AI upscaler run over the folder
    keeps them), at any size: twice or four times the original is usual.
 3. Put them in `textures/` in the data folder (folders inside it, two levels

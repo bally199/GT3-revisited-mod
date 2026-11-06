@@ -732,6 +732,16 @@ private:
                    a->apply_texture_packs();
                });
 
+        // HD texture packs: every course and car built once with the dump on (App::start_texture_tour)
+        {
+            const std::string status = app.texture_tour_status();
+            action("Dump all textures",
+                   "Turn Dump textures on and build every course and every car in every paint once, so "
+                   "texture_dump gets all of them (a few minutes; the game keeps running)." +
+                       (status.empty() ? std::string() : " " + status + "."),
+                   "", [a] { a->start_texture_tour(); });
+        }
+
         // HD movies (docs/MODDING.md): the disc's movies into movie_dump/ (App::dump_movies)
         {
             const std::string status = app.movie_dump_status();

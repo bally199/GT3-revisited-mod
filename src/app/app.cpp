@@ -20,6 +20,8 @@
 #include "video/movie_player.h"
 #include "video/field_layout.h"
 #include "video/movie.h"
+#include "race/paint.h"
+#include "race/race_scene.h"
 
 #include <algorithm>
 #include <atomic>
@@ -582,6 +584,69 @@ void App::apply_texture_packs() {
     gpu_->set_texture_packs(dump ? data_dir_ + "texture_dump" : std::string(), {data_dir_ + "textures"});
 }
 
+void App::start_texture_tour() {
+    if (!vfs_ || !gpu_ || !tour_jobs_.empty()) return;
+    config_.set("video", "texture_dump", "on");
+    save_config();
+    apply_texture_packs();
+    tour_total_ = tour_done_ = 0;
+    for (const std::string& name : vfs_->list_dir("courses")) {
+        if (name.empty() || name.back() == '/') continue;
+        tour_jobs_.push_back([this, name] {
+            if (std::optional<Bytes> f = vfs_->read("courses/" + name)) try {
+                    race::CourseScene scene(*gpu_, *f, name);
+                } catch (const std::exception& e) {
+                    LOG_WARN("Texture tour: courses/%s: %s", name.c_str(), e.what());
+                }
+        });
+    }
+    auto colors = std::make_shared<race::CarColors>();
+    colors->load(*vfs_);
+    for (const char* folder : {"cars/day/", "cars/eve/", "cars/night/"})
+        for (const std::string& model : vfs_->list_dir(folder)) {
+            if (model.empty() || model.back() == '/') continue;
+            const std::vector<u32>* ids = colors->ids(model);
+            const int paints = ids && !ids->empty() ? int(ids->size()) : 1;
+            for (int paint = 0; paint < paints; ++paint)
+                tour_jobs_.push_back([this, folder = std::string(folder), model, paint] {
+                    std::optional<Bytes> f = vfs_->read(folder + model);
+                    if (!f || f->empty()) return;
+                    std::optional<Bytes> showroom = folder == "cars/day/" ? vfs_->read("menu/cars/" + model) : std::nullopt;
+                    try {
+                        race::CarVisual car(*gpu_, *f, model, WheelSpec{}, paint, {}, {},
+                                            showroom ? ByteSpan(*showroom) : ByteSpan{});
+                    } catch (const std::exception& e) {
+                        LOG_WARN("Texture tour: %s%s paint %d: %s", folder.c_str(), model.c_str(), paint, e.what());
+                    }
+                });
+        }
+    tour_total_ = int(tour_jobs_.size());
+    LOG_INFO("Texture tour: %d courses and car paints to build", tour_total_);
+}
+
+void App::texture_tour_step() {
+    if (!tour_checked_env_ && vfs_ && gpu_) {
+        tour_checked_env_ = true;
+        if (const char* e = SDL_getenv("GT3R_TEXTURE_TOUR"); e && *e && *e != '0') start_texture_tour();
+    }
+    if (tour_jobs_.empty()) return;
+    const Uint64 t0 = SDL_GetTicksNS();
+    while (!tour_jobs_.empty() && SDL_GetTicksNS() - t0 < 30'000'000ull) { // ~30 ms of it a frame
+        std::function<void()> job = std::move(tour_jobs_.front());
+        tour_jobs_.pop_front();
+        job();
+        if (++tour_done_ % 100 == 0 || tour_jobs_.empty())
+            LOG_INFO("Texture tour: %d of %d", tour_done_, tour_total_);
+        if (tour_jobs_.empty()) LOG_INFO("Texture tour: done");
+    }
+}
+
+std::string App::texture_tour_status() const {
+    if (tour_total_ == 0) return "";
+    if (!tour_jobs_.empty()) return "Dumping textures: " + std::to_string(tour_done_) + " of " + std::to_string(tour_total_);
+    return "Texture dump done: " + std::to_string(tour_total_) + " courses and car paints";
+}
+
 void App::dump_movies() {
     if (!vfs_ || (movie_dump_.joinable() && movie_dump_done_ < movie_dump_total_)) return;
     if (movie_dump_.joinable()) movie_dump_.join();
@@ -989,6 +1054,8 @@ SDL_AppResult App::iterate() {
     touch_.set_safe_area(safe_area_window());
     touch_.render(*ui_);
     draw_fps(shown && shown->adaptive_ui());
+    texture_tour_step();
+    if (!tour_jobs_.empty()) ui_->text(12, 12, texture_tour_status());
     if (phone_sim_) draw_phone_mask();
     if (pointer_shown_) { // a scripted pointer's arrow (screenshots)
         const float x = pointer_x_, y = pointer_y_;

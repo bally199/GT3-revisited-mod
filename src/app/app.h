@@ -20,6 +20,7 @@
 #include <thread>
 #include <SDL3/SDL.h>
 
+#include <deque>
 #include <functional>
 #include <memory>
 #include <string>
@@ -105,6 +106,12 @@ public:
     // two field pictures stacked per frame; "frames": progressive). Status: movie_dump_status().
     void dump_movies();
     std::string movie_dump_status() const;
+    // Settings > Video > Dump all textures (or GT3R_TEXTURE_TOUR=1 at start): texture_dump on,
+    // then every course file and every car model (day, evening and night, in each paint, with
+    // its showroom body) built once, one a frame, so texture_dump/ gets them all without
+    // driving them. texture_tour_status(): progress ("" when not running).
+    void start_texture_tour();
+    std::string texture_tour_status() const;
     void set_replay_30fps(bool on);
     void request_half_rate() { half_request_ = true; }
     void set_limit_60fps(bool on);
@@ -315,6 +322,10 @@ private:
     double frame_limit_rate_ = 0;
     bool half_request_ = false, half_rate_ = false; // request_half_rate(): this frame's ask; in force
     std::thread movie_dump_;
+    std::deque<std::function<void()>> tour_jobs_;
+    int tour_total_ = 0, tour_done_ = 0;
+    bool tour_checked_env_ = false;
+    void texture_tour_step();
     std::atomic<int> movie_dump_done_{0}, movie_dump_total_{-1}; // -1: not started
     void apply_half_rate();
     void apply_frame_limit();
