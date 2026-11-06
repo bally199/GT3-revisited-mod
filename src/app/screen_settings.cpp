@@ -722,6 +722,16 @@ private:
                    a->save_config();
                });
 
+        // [video] texture_packs = on | off (default on; App::apply_texture_packs)
+        toggle("HD textures",
+               "Use the PNGs in the textures folder of the data folder in place of the game's textures "
+               "(an HD texture pack). From the next race or restart.",
+               to_lower(cfg.get("video", "texture_packs").value_or("on")) != "off", [a](bool v) {
+                   a->config().set("video", "texture_packs", v ? "on" : "off");
+                   a->save_config();
+                   a->apply_texture_packs();
+               });
+
         // [video] texture_dump = on | off (default off; App::apply_texture_packs)
         toggle("Dump textures",
                "Save every texture the game loads into the texture_dump folder of the data folder, for "

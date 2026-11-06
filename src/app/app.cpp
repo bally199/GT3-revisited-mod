@@ -578,10 +578,12 @@ void App::set_menu_shape(int shape) {
 void App::apply_texture_packs() {
     if (!gpu_) return;
     const bool dump = to_lower(config_.get("video", "texture_dump").value_or("off")) == "on";
+    const bool packs = to_lower(config_.get("video", "texture_packs").value_or("on")) != "off"; // Settings: HD textures
     host_make_dir(data_dir_ + "textures");
     host_make_dir(data_dir_ + "movies_hd"); // HD movies outside the mods (video::open_movie)
     video::set_hd_movie_folder(data_dir_ + "movies_hd");
-    gpu_->set_texture_packs(dump ? data_dir_ + "texture_dump" : std::string(), {data_dir_ + "textures"});
+    gpu_->set_texture_packs(dump ? data_dir_ + "texture_dump" : std::string(),
+                            packs ? std::vector<std::string>{data_dir_ + "textures"} : std::vector<std::string>{});
 }
 
 void App::start_texture_tour() {
