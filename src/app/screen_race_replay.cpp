@@ -558,12 +558,18 @@ void RaceScreen::apply_post_pass(render::DrawOptions& o) const {
 void RaceScreen::apply_depth_of_field(render::DrawOptions& o) const {
     const SunParams& e = sun_.params();
     const bool replay = replaying_ || attract_ || demo_ || backdrop_;
-    if (!replay || !e.has_env || !e.dof || dof_off_) return;
+    const bool live_look = replay_look_ && live_view(); // [video] replay_look
+    if ((!replay && !live_look) || !e.has_env || !e.dof || dof_off_) return;
     render::DrawOptions::DepthOfField& d = o.dof;
     d.on = true;
     d.f_number = e.dof_f_number;
     d.focal_mm = e.dof_focal_mm;
-    d.focus = std::max(camera_.focus(), e.dof_min_focus);
+    float focus = camera_.focus();
+    if (live_look && !camera_.onboard()) { // the driver's outside views: on the car, as a replay's shots
+        const sim::Vec3 v = render_state_.position - to_sim(camera_.eye());
+        focus = std::sqrt(v.dot(v));
+    }
+    d.focus = std::max(focus, e.dof_min_focus);
     d.far = e.far_clip;
 }
 

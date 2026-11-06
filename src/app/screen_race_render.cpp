@@ -673,7 +673,7 @@ void RaceScreen::add_screen_passes(render::DrawOptions& o, const SDL_FRect& rect
     }
     // The vignette: replays and demonstrations (race +0x9784) on Env0 flag 0x40 courses.
     vignette_batch_.clear();
-    if (e.vignette && !live_view()) {
+    if (e.vignette && (!live_view() || replay_look_)) {
         add_vignette(vignette_batch_, e);
         o.vignette = &vignette_batch_;
     }

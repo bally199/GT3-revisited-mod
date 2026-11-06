@@ -796,6 +796,9 @@ private:
     bool no_far_plane_ = SDL_getenv("GT3R_NO_FAR_PLANE") != nullptr;    // compare without GT3's far plane
     bool dof_off_ = SDL_getenv("GT3R_NO_DOF") != nullptr; // compare without the replay depth of field
     bool heat_haze_ = false; // [video] heat_haze = on (default off): replays' heat haze lenses
+    // [video] replay_look = on (default off): the replays' depth of field (focused on the car in the
+    // outside views) and vignette while driving too.
+    bool replay_look_ = false;
     LampGlows lamps_;
     // The passes between the 3D scene and the grade, and the replay vignette (presentation §L6):
     // the heat haze lenses (stepped every 60 Hz tick), and this frame's batches for View3D.

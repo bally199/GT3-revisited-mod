@@ -722,6 +722,15 @@ private:
                    a->save_config();
                });
 
+        // [video] replay_look = on | off (default off; RaceScreen::apply_depth_of_field)
+        toggle("Replay look while racing",
+               "The replays' depth of field (focused on your car in the outside views) and, on the courses "
+               "that have it, their vignette, while you drive. Costs GPU time.",
+               to_lower(cfg.get("video", "replay_look").value_or("off")) == "on", [a](bool v) {
+                   a->config().set("video", "replay_look", v ? "on" : "off");
+                   a->save_config();
+               });
+
         // [video] heat_haze = on | off (default off; RaceScreen::add_screen_passes)
         Row& haze = toggle("Heat haze in replays",
                            "GT3's heat shimmer over some trackside camera shots in replays, on some courses.",
