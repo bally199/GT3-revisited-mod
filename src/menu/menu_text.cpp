@@ -35,4 +35,17 @@ TextDrawer make_game_font_drawer(text::GameFonts& fonts) {
     };
 }
 
+MenuRenderer::TextHd make_game_font_hd(text::GameFonts& fonts) {
+    return [&fonts](const TextStyle& ts) {
+        if (!fonts.loaded() || ts.text.empty()) return false;
+        text::TextStyle st;
+        text::GameFont* f = fonts.resolve(ts.font, st);
+        return f && f->hd(st.variant);
+    };
+}
+
+void use_game_fonts(MenuRenderer& r, text::GameFonts& fonts) {
+    r.set_text_drawer(make_game_font_drawer(fonts), make_game_font_hd(fonts));
+}
+
 } // namespace gt3r::menu

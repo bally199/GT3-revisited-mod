@@ -114,7 +114,12 @@ public:
     const MenuScene* scene() const { return scene_; }
     // While a widget drawer runs: the scene that owns the element being drawn (its images).
     const MenuScene* drawing_scene() const { return drawing_ ? drawing_ : scene_; }
-    void set_text_drawer(TextDrawer d) { text_ = std::move(d); }
+    // `hd`: whether the drawer draws a text style from HD glyphs (texture packs), for set_canvas.
+    using TextHd = std::function<bool(const TextStyle&)>;
+    void set_text_drawer(TextDrawer d, TextHd hd = {}) {
+        text_ = std::move(d);
+        text_hd_ = std::move(hd);
+    }
     // Called for widgets bound to game code (e.g. class "mpeg": a movie)
     // at their place in the draw order; `box` is in target pixels.
     using WidgetDrawer = std::function<void(SDL_Renderer*, const Element&, const SDL_FRect& box, float alpha)>;
@@ -124,8 +129,10 @@ public:
     void set_widget_overlay_drawer(WidgetDrawer d) { widget_overlay_ = std::move(d); }
 
     // The page's picture at the screen's resolution (menu_canvas.h): when it is on, the gauges'
-    // arcs and the art with an HD replacement image are drawn into it, at its resolution, between
-    // the 640 x 448 art (as the 3D models are), instead of into the page.
+    // arcs and the art with an HD replacement (its image, or its text's glyphs) are drawn into it,
+    // at its resolution, between the 640 x 448 art (as the 3D models are), instead of into the
+    // page; and with them what follows them that has no HD replacement of its own either way
+    // (up to an element whose widget callbacks run: those draw into the page).
     void set_canvas(MenuCanvas* canvas) { canvas_ = canvas; }
 
     // HD replacements for the menus' images (texture packs, docs/MODDING.md), for every
@@ -150,8 +157,9 @@ private:
     void draw_element(const Element& e, const std::vector<SDL_Texture*>& textures, const ElementDraw& t,
                       const RenderOptions& ro, const SDL_FRect& dst);
     void draw_effect(const ElementDraw& t, const SDL_FRect& dst, bool fine = false);
-    // Whether `d` goes into the canvas's picture (set_canvas).
-    bool sharp(const ElementDraw& d);
+    // Whether `d` goes into the canvas's picture (set_canvas): Either = where the one before went.
+    enum class Sharp : u8 { No, Yes, Either };
+    Sharp sharp(const ElementDraw& d, const RenderOptions& ro);
     const std::vector<SDL_Texture*>& textures_for(const MenuScene* scene);
     std::vector<SDL_Texture*> upload(const MenuScene* scene);
     void release();
@@ -164,6 +172,7 @@ private:
     std::set<SDL_Texture*> hd_; // made from an image_pack() replacement
     MenuCanvas* canvas_ = nullptr;
     TextDrawer text_ = draw_text_debug_font;
+    TextHd text_hd_;
     WidgetDrawer widget_;
     WidgetDrawer widget_overlay_;
 };

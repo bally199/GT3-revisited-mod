@@ -83,7 +83,8 @@ SDL_FRect GameFont::render(const TextLayout& lay, const TextStyle& style) {
             SDL_SetTextureAlphaMod(t, style.color.a);
             SDL_RenderTexture(r, t, &src, &dst);
         } else if (atlas) {
-            SDL_FRect src{float(q.sx), float(q.sy), float(q.sw), float(q.sh)};
+            const SDL_FPoint k = atlas_scale_[v];
+            SDL_FRect src{float(q.sx) * k.x, float(q.sy) * k.y, float(q.sw) * k.x, float(q.sh) * k.y};
             SDL_RenderTexture(r, atlas, &src, &dst);
         }
     }
@@ -91,6 +92,16 @@ SDL_FRect GameFont::render(const TextLayout& lay, const TextStyle& style) {
 }
 
 // --- GameFonts ---------------------------------------------------------------
+
+namespace {
+GameFonts::AtlasPack& atlas_pack_slot() {
+    static GameFonts::AtlasPack pack;
+    return pack;
+}
+} // namespace
+
+void GameFonts::set_atlas_pack(AtlasPack pack) { atlas_pack_slot() = std::move(pack); }
+const GameFonts::AtlasPack& GameFonts::atlas_pack() { return atlas_pack_slot(); }
 
 GameFonts::GameFonts() = default;
 GameFonts::~GameFonts() { unload(); }
@@ -127,13 +138,27 @@ bool GameFonts::load(const Vfs& vfs, SDL_Renderer* renderer) {
             LOG_WARN("fonts: %s: %s", path, e.what());
         }
     }
+    int hd_atlases = 0;
     for (FontFile& file : files_)
         for (const LatinFont& lf : file.fonts) {
             auto f = std::unique_ptr<GameFont>(new GameFont(this, &lf));
             for (int v = 0; v < kFontVariants; ++v) {
                 const Tex1::Image& img = lf.atlas[v];
-                if (img.width && img.height)
-                    f->atlas_[v] = make_texture(renderer, int(img.width), int(img.height), img.rgba.data());
+                if (!img.width || !img.height) continue;
+                if (const AtlasPack& pack = atlas_pack(); pack && img.rgba.size() >= size_t(img.width) * img.height) {
+                    std::optional<Tex1::Image> hd = pack(img);
+                    if (hd && hd->width >= img.width && hd->height >= img.height &&
+                        hd->rgba.size() >= size_t(hd->width) * hd->height &&
+                        (hd->width != img.width || hd->height != img.height)) {
+                        f->atlas_[v] = make_texture(renderer, int(hd->width), int(hd->height), hd->rgba.data());
+                        if (f->atlas_[v]) {
+                            f->atlas_scale_[v] = {float(hd->width) / float(img.width), float(hd->height) / float(img.height)};
+                            ++hd_atlases;
+                            continue;
+                        }
+                    }
+                }
+                f->atlas_[v] = make_texture(renderer, int(img.width), int(img.height), img.rgba.data());
             }
             fonts_.push_back(std::move(f));
         }
@@ -143,8 +168,8 @@ bool GameFonts::load(const Vfs& vfs, SDL_Renderer* renderer) {
     } catch (const std::exception& e) {
         LOG_WARN("fonts: kanji support unavailable: %s", e.what());
     }
-    LOG_INFO("fonts: %zu fonts, %zu kanji, %zu JIS codes", fonts_.size(), kanji_ ? kanji_->glyph_count() : 0,
-             jis_.size());
+    LOG_INFO("fonts: %zu fonts, %zu kanji, %zu JIS codes%s", fonts_.size(), kanji_ ? kanji_->glyph_count() : 0,
+             jis_.size(), hd_atlases ? (", " + std::to_string(hd_atlases) + " HD atlases").c_str() : "");
     return loaded();
 }
 

@@ -414,7 +414,7 @@ private:
             }
             draw_modulated(r, movie_.texture(), src, dst, e, alpha);
         });
-        if (fonts_.load(*app.vfs(), app.renderer())) renderer_->set_text_drawer(make_game_font_drawer(fonts_));
+        if (fonts_.load(*app.vfs(), app.renderer())) use_game_fonts(*renderer_, fonts_);
         sounds_.load(*app.vfs());
         apply_options(app);
         try {

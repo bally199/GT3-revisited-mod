@@ -11,6 +11,7 @@
 #include "game/gt_mode_menu.h"
 #include "menu/menu_renderer.h"
 #include "menu/menu_scene.h"
+#include "text/game_font.h"
 #include "game/gt_save.h"
 #include "game/save_folder.h"
 #include "platform/document_tree.h"
@@ -595,12 +596,14 @@ void App::apply_texture_packs() {
     // are shown larger than the 3D textures, so they are upscaled further), replaced from the
     // same packs (textures\menu, say).
     const std::string menu_dump = dump ? data_dir_ + "menu_dump/" : std::string();
-    if (dump) host_make_dir(menu_dump);
+    // The fonts' glyph atlases the same, in a folder of their own (upscaled differently: the
+    // glyphs' shapes are in their alpha).
+    const std::string font_dump = dump ? data_dir_ + "font_dump/" : std::string();
+    if (dump) host_make_dir(menu_dump), host_make_dir(font_dump);
     struct Dumped {
         std::mutex mutex;
         std::set<std::string> names;
     };
-    auto dumped = std::make_shared<Dumped>();
     // The replacements decoded lately, kept (the most recently used first) up to a budget: going
     // back to a page takes them from memory instead of reading and decoding the PNGs again.
     struct Decoded {
@@ -611,57 +614,66 @@ void App::apply_texture_packs() {
     };
     constexpr size_t kDecodedBudget = size_t(384) << 20;
     auto decoded = std::make_shared<Decoded>();
-    menu::MenuRenderer::set_image_pack([this, menu_dump, packs, dumped, decoded](const menu::MenuImage& img)
-                                           -> std::optional<menu::MenuImage> {
-        if (!gpu_ || img.rgba.size() < size_t(img.width) * img.height) return std::nullopt;
-        const std::string name = render::GpuContext::texture_pack_name(
-            img.width, img.height, render::GpuContext::texture_pack_hash(img.rgba.data(), size_t(img.width) * img.height));
-        bool first = false;
-        if (!menu_dump.empty()) {
-            std::lock_guard lock(dumped->mutex);
-            first = dumped->names.insert(name).second;
-        }
-        if (first) {
-            const std::string path = menu_dump + name + ".png";
-            if (!host_path_exists(path)) write_host_file(path, encode_png(img.width, img.height, img.rgba));
-        }
-        if (!packs) return std::nullopt;
-        const std::string* file = gpu_->texture_pack_file(name);
-        if (!file) return std::nullopt;
-        {
-            std::lock_guard lock(decoded->mutex);
-            auto it = decoded->images.find(name);
-            if (it != decoded->images.end()) {
-                decoded->order.splice(decoded->order.begin(), decoded->order, it->second.second);
-                return it->second.first;
+    // Dumps `img` into `dump_dir` (once a run) and returns its replacement from the packs, if any.
+    auto lookup = [this, packs, decoded](const std::string& dump_dir) {
+        return [this, dump_dir, packs, decoded, dumped = std::make_shared<Dumped>()](const menu::MenuImage& img)
+                   -> std::optional<menu::MenuImage> {
+            if (!gpu_ || img.rgba.size() < size_t(img.width) * img.height) return std::nullopt;
+            const std::string name = render::GpuContext::texture_pack_name(
+                img.width, img.height, render::GpuContext::texture_pack_hash(img.rgba.data(), size_t(img.width) * img.height));
+            bool first = false;
+            if (!dump_dir.empty()) {
+                std::lock_guard lock(dumped->mutex);
+                first = dumped->names.insert(name).second;
             }
-        }
-        try {
-            if (std::optional<Bytes> data = read_host_file(*file)) {
-                PngImage png = decode_png(*data);
-                if (!png.width || !png.height) return std::nullopt;
-                menu::MenuImage hd{png.width, png.height, std::move(png.rgba)};
-                const size_t size = hd.rgba.size() * sizeof(hd.rgba[0]);
-                if (size <= kDecodedBudget / 4) {
-                    std::lock_guard lock(decoded->mutex);
-                    if (!decoded->images.count(name)) {
-                        decoded->order.push_front(name);
-                        decoded->images.emplace(name, std::make_pair(hd, decoded->order.begin()));
-                        decoded->bytes += size;
-                        while (decoded->bytes > kDecodedBudget && decoded->order.size() > 1) {
-                            auto old = decoded->images.find(decoded->order.back());
-                            decoded->bytes -= old->second.first.rgba.size() * sizeof(old->second.first.rgba[0]);
-                            decoded->images.erase(old);
-                            decoded->order.pop_back();
+            if (first) {
+                const std::string path = dump_dir + name + ".png";
+                if (!host_path_exists(path)) write_host_file(path, encode_png(img.width, img.height, img.rgba));
+            }
+            if (!packs) return std::nullopt;
+            const std::string* file = gpu_->texture_pack_file(name);
+            if (!file) return std::nullopt;
+            {
+                std::lock_guard lock(decoded->mutex);
+                auto it = decoded->images.find(name);
+                if (it != decoded->images.end()) {
+                    decoded->order.splice(decoded->order.begin(), decoded->order, it->second.second);
+                    return it->second.first;
+                }
+            }
+            try {
+                if (std::optional<Bytes> data = read_host_file(*file)) {
+                    PngImage png = decode_png(*data);
+                    if (!png.width || !png.height) return std::nullopt;
+                    menu::MenuImage hd{png.width, png.height, std::move(png.rgba)};
+                    const size_t size = hd.rgba.size() * sizeof(hd.rgba[0]);
+                    if (size <= kDecodedBudget / 4) {
+                        std::lock_guard lock(decoded->mutex);
+                        if (!decoded->images.count(name)) {
+                            decoded->order.push_front(name);
+                            decoded->images.emplace(name, std::make_pair(hd, decoded->order.begin()));
+                            decoded->bytes += size;
+                            while (decoded->bytes > kDecodedBudget && decoded->order.size() > 1) {
+                                auto old = decoded->images.find(decoded->order.back());
+                                decoded->bytes -= old->second.first.rgba.size() * sizeof(old->second.first.rgba[0]);
+                                decoded->images.erase(old);
+                                decoded->order.pop_back();
+                            }
                         }
                     }
+                    return hd;
                 }
-                return hd;
+            } catch (const std::exception& e) {
+                LOG_WARN("Texture pack: %s: %s", file->c_str(), e.what());
             }
-        } catch (const std::exception& e) {
-            LOG_WARN("Texture pack: %s: %s", file->c_str(), e.what());
-        }
-        return std::nullopt;
+            return std::nullopt;
+        };
+    };
+    menu::MenuRenderer::set_image_pack(lookup(menu_dump));
+    text::GameFonts::set_atlas_pack([fonts = lookup(font_dump)](const Tex1::Image& atlas) -> std::optional<Tex1::Image> {
+        std::optional<menu::MenuImage> hd = fonts(menu::MenuImage{atlas.width, atlas.height, atlas.rgba});
+        if (!hd) return std::nullopt;
+        return Tex1::Image{hd->width, hd->height, std::move(hd->rgba)};
     });
 }
 
@@ -714,8 +726,21 @@ void App::start_texture_tour() {
                     LOG_WARN("Texture tour: %s: %s", path.c_str(), e.what());
                 }
             });
+    // The fonts' glyph atlases (font_dump).
+    tour_jobs_.push_back([this] {
+        const text::GameFonts::AtlasPack& pack = text::GameFonts::atlas_pack();
+        if (!pack) return;
+        for (const char* path : {"font/system.fnt", "font/menu.fnt"})
+            if (std::optional<Bytes> data = vfs_->read(path)) try {
+                    for (const text::LatinFont& font : text::FontFile::parse(*data).fonts)
+                        for (const Tex1::Image& atlas : font.atlas)
+                            if (atlas.width && atlas.height && !atlas.rgba.empty()) pack(atlas);
+                } catch (const std::exception& e) {
+                    LOG_WARN("Texture tour: %s: %s", path, e.what());
+                }
+    });
     tour_total_ = int(tour_jobs_.size());
-    LOG_INFO("Texture tour: %d courses, car paints and menus to build", tour_total_);
+    LOG_INFO("Texture tour: %d courses, car paints, menus and fonts to build", tour_total_);
 }
 
 void App::texture_tour_step() {
@@ -1742,7 +1767,8 @@ bool App::show_song() const { return to_lower(config_.get("music", "show_song").
 
 void App::shutdown() {
     music_.cancel(); // a folder scan's thread reads files through SDL
-    menu::MenuRenderer::set_image_pack({}); // (it refers to this App)
+    menu::MenuRenderer::set_image_pack({}); // (they refer to this App)
+    text::GameFonts::set_atlas_pack({});
     if (movie_dump_.joinable()) movie_dump_.join();
     remember_race_scale();
     if (input_) save_config();

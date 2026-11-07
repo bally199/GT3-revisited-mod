@@ -27,8 +27,10 @@
 
 #include <SDL3/SDL_render.h>
 
+#include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -82,6 +84,8 @@ public:
 
     // The Latin glyph atlas texture (owned by the font).
     SDL_Texture* atlas(FontVariant v) const { return atlas_[size_t(v)]; }
+    // The atlas is a texture pack's larger copy (GameFonts::set_atlas_pack).
+    bool hd(FontVariant v) const { return atlas_scale_[size_t(v) % kFontVariants].x != 1.0f; }
 
 private:
     friend class GameFonts;
@@ -91,6 +95,8 @@ private:
     GameFonts* owner_;
     const LatinFont* data_;
     SDL_Texture* atlas_[kFontVariants] = {};
+    // Atlas pixels per glyph-rect pixel (an HD atlas is larger than the disc's).
+    SDL_FPoint atlas_scale_[kFontVariants] = {{1, 1}, {1, 1}};
 };
 
 class GameFonts {
@@ -104,6 +110,13 @@ public:
     // font/jis2uni.dat. Returns false if no font could be loaded; missing
     // optional parts (kanji, JIS table) are logged and tolerated.
     bool load(const Vfs& vfs, SDL_Renderer* renderer);
+
+    // HD glyph atlases (texture packs): called with each Latin atlas as it loads (from any
+    // thread); returns a larger copy to draw with instead (glyph rectangles scale by the
+    // ratio of the sizes), or nothing. Unset (the default): the disc's atlases.
+    using AtlasPack = std::function<std::optional<Tex1::Image>(const Tex1::Image&)>;
+    static void set_atlas_pack(AtlasPack pack);
+    static const AtlasPack& atlas_pack();
     void unload();
     bool loaded() const { return !fonts_.empty(); }
 

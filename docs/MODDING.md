@@ -378,11 +378,22 @@ animated ones) keep their originals. The HUD and the movies are not covered.
 (Dump all textures goes through every menu file of every language too) and
 replaced from the same `textures/` folders. With Settings → Display → Sharp
 cars and prizes in menus on and a screen larger than 640 × 448, an element
-whose image has a replacement is drawn at the screen's resolution between the
-rest of the page's art (as the 3D cars are), and so are the car pages'
-handling / speed / acceleration gauges; the rest stays the 640 × 448 picture.
-Menu images are shown larger than most textures: four times the original suits
-them.
+whose image (or text, below) has a replacement is drawn at the screen's
+resolution between the rest of the page's art (as the 3D cars are), and so are
+the car pages' handling / speed / acceleration gauges and what follows them
+without a replacement of its own (up to an element drawn by game code); what
+comes before them stays the 640 × 448 picture. Menu images are shown larger
+than most textures: four times the original suits them.
+
+**Fonts.** The Latin fonts' glyph atlases (`font/system.fnt`, `font/menu.fnt`,
+one per palette: outlined and plain) are dumped into `font_dump/` when a font
+loads (and by Dump all textures) and replaced from the same `textures/`
+folders; a larger atlas keeps the original's layout scaled up (four times, say),
+and the glyphs are drawn from it at the same place and size. That sharpens the
+menus' text (drawn at the screen's resolution as above) and the race HUD's. The
+glyphs' shapes are in the atlases' alpha, so an upscaler should scale the alpha
+as an image too, not just smooth it. The kanji font is drawn glyph by glyph and
+not covered.
 
 ## HD movies
 

@@ -33,7 +33,7 @@ public:
     void update(App& app, double) override {
         if (!renderer_) {
             renderer_ = std::make_unique<MenuRenderer>(app.renderer());
-            if (fonts_.load(*app.vfs(), app.renderer())) renderer_->set_text_drawer(make_game_font_drawer(fonts_));
+            if (fonts_.load(*app.vfs(), app.renderer())) use_game_fonts(*renderer_, fonts_);
         }
         if (files_dirty_) refresh(app);
         if (const char* env = std::getenv("GT3R_MENU"); env && !env_done_) {
@@ -224,7 +224,7 @@ private:
         if (m.pressed(PadButton::Select)) aspect43_ = !aspect43_;
         if (m.pressed(PadButton::Start) && renderer_) {
             game_font_ = !game_font_ && fonts_.loaded();
-            if (game_font_) renderer_->set_text_drawer(make_game_font_drawer(fonts_));
+            if (game_font_) use_game_fonts(*renderer_, fonts_);
             else renderer_->set_text_drawer(draw_text_debug_font);
         }
         clamp_view();

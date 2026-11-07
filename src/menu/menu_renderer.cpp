@@ -202,7 +202,8 @@ void MenuRenderer::draw_elements(const std::vector<ElementDraw>& list, const Ren
     bool in_sharp = false, art_since = true; // (art drawn into the page / layer since the last run)
     for (const ElementDraw& d : list) {
         if (d.alpha <= 0.0f) continue;
-        const bool s = can_sharp && sharp(d);
+        const Sharp k = can_sharp ? sharp(d, ro) : Sharp::No;
+        const bool s = k == Sharp::Yes || (k == Sharp::Either && in_sharp);
         if (s && !in_sharp) {
             canvas_->model_begin(r_, art_since);
             in_sharp = true;
@@ -235,15 +236,19 @@ void MenuRenderer::draw_elements(const std::vector<ElementDraw>& list, const Ren
     SDL_SetRenderClipRect(r_, had_clip ? &old_clip : nullptr);
 }
 
-bool MenuRenderer::sharp(const ElementDraw& d) {
-    if (d.kind == ElementDraw::Kind::Arc) return true;
-    if (d.kind != ElementDraw::Kind::Element || !d.element || d.overlay || d.hide_parts) return false;
+MenuRenderer::Sharp MenuRenderer::sharp(const ElementDraw& d, const RenderOptions& ro) {
+    if (d.kind == ElementDraw::Kind::Arc) return Sharp::Yes;
+    if (d.kind != ElementDraw::Kind::Element || !d.element) return Sharp::Either; // (flat colour: as sharp either way)
     const Element& e = *d.element;
     // (Not those whose widget callbacks run: they can draw models of their own into the canvas.)
-    if (d.widget && e.widget_class && !e.widget_class->empty()) return false;
-    if (!e.image) return false;
-    const std::vector<SDL_Texture*>& textures = textures_for(d.scene);
-    return e.image->image < textures.size() && hd_.count(textures[e.image->image]) != 0;
+    if (d.overlay || (d.widget && e.widget_class && !e.widget_class->empty())) return Sharp::No;
+    if (e.image && !d.hide_parts && ro.images) {
+        const std::vector<SDL_Texture*>& textures = textures_for(d.scene);
+        if (e.image->image < textures.size() && hd_.count(textures[e.image->image])) return Sharp::Yes;
+    }
+    if (e.text && ro.text && text_hd_ && text_hd_(*e.text)) return Sharp::Yes;
+    // The disc's pixels look the same scaled up before or after: with the run around them.
+    return Sharp::Either;
 }
 
 void MenuRenderer::draw(int page, const SceneOptions& so, const RenderOptions& ro, const SDL_FRect& dst) {
@@ -495,7 +500,7 @@ std::vector<u32> render_page_rgba(const MenuScene& scene, int page, const SceneO
     {
         text::GameFonts fonts;
         MenuRenderer mr(r);
-        if (fonts_vfs && fonts.load(*fonts_vfs, r)) mr.set_text_drawer(make_game_font_drawer(fonts));
+        if (fonts_vfs && fonts.load(*fonts_vfs, r)) use_game_fonts(mr, fonts);
         mr.set_scene(&scene);
         SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
         SDL_RenderClear(r);

@@ -174,7 +174,7 @@ private:
         const bool shows = set_.empty();
         renderer_ = std::make_unique<MenuRenderer>(app.renderer());
         renderer_->set_canvas(&canvas_); // gauges and HD art at the screen's resolution
-        if (fonts_.load(*app.vfs(), app.renderer())) renderer_->set_text_drawer(make_game_font_drawer(fonts_));
+        if (fonts_.load(*app.vfs(), app.renderer())) use_game_fonts(*renderer_, fonts_);
         // GT-mode 3D models (prize presentations: cups, licence cards; car renders).
         renderer_->set_widget_overlay_drawer([this, &app](SDL_Renderer* r, const Element& e, const SDL_FRect& box,
                                                           float alpha) {
