@@ -100,10 +100,10 @@ upload the `.iso` there, and pick it from there (the app always reaches its own 
   it off (a little faster, untested for regressions).
 - **Uniforms one buffer per slot** instead of ranges of one buffer (`glBindBufferRange` at
   offsets drew other draws' uniforms on ANGLE/D3D11 11_0).
-- **Car pages and prize presentations in one pass**, supersampled 2x (when the render scale is
-  under 200%) instead of GT3's 4-6 jittered passes: with the passes' scratch target every other
-  frame came out wrong on the console (white, or an earlier picture over the whole screen) while
-  every step read back was right. `GT3R_SHOWROOM=8` (below) brings the passes back for tests.
+- **Car pages and prize presentations** draw GT3's jitter passes as everywhere else. They
+  briefly drew one pass (supersampled 2x) while the passes came out wrong on the console (white,
+  or an earlier picture over the whole screen); the finish after each 3D frame (below) was the
+  real fix. `GT3R_SHOWROOM=1` still forces one pass for tests.
 - **No framebuffer discards** (`glInvalidateFramebuffer`): ANGLE makes them real D3D11 discards.
 - **A `glFinish` after each 3D frame** (each submitted command buffer that drew): without it the
   2D renderer now and then showed a frame whose 3D work had not reached it, in replays most
@@ -117,8 +117,7 @@ upload the `.iso` there, and pick it from there (the app always reaches its own 
 `args.txt` in the data folder (one argument per line, read at start) takes `--env NAME=value`
 pairs, the way Android does: `GT3R_CAPTURE3D=<first>,<count>,<path>` (3D frames as PNGs),
 `GT3R_CAPTURE2D=<first>,<count>,<path>` (each 2D step of the car pages),
-`GT3R_SHOWROOM=<bits>` (car page passes: 1 one pass, 2 no floor mirror, 4 no compositing,
-8 the 4 passes on Xbox), `GT3R_GLES_PROBE=<bits>` (1 clears off exact 0/1, 2 a `glFinish`
+`GT3R_SHOWROOM=<bits>` (car page passes: 1 one pass, 2 no floor mirror, 4 no compositing), `GT3R_GLES_PROBE=<bits>` (1 clears off exact 0/1, 2 a `glFinish`
 after every pass). Upload it with Device Portal's file explorer.
 
 ## Known gaps and first things to check

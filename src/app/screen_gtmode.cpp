@@ -266,13 +266,9 @@ private:
     // Xbox: the car pages' one pass (see showroom()) supersampled instead: drawn at twice the
     // page's size and halved by the 2D renderer's linear filter (the mean of 2 x 2 texels a
     // pixel), unless the render scale already goes that far.
-    static void supersample(App& app, render::DrawOptions& o, int w, int h) {
-#if GT3R_UWP
-        if (app.gpu() && app.gpu()->render_scale() < 2.0f) o.fixed_width = 2 * w, o.fixed_height = 2 * h;
-#else
-        (void)app, (void)o, (void)w, (void)h;
-#endif
-    }
+    // (Was the Xbox's stand-in for the jitter passes, 2x supersampling, while they came out wrong
+    // there; the finish after each 3D frame, gpu_gles finish_submits, fixed that.)
+    static void supersample(App& app, render::DrawOptions& o, int w, int h) { (void)app, (void)o, (void)w, (void)h; }
     const ShowroomCamera& showroom_camera(App& app, const std::string& kind) {
         auto it = cameras_.find(kind);
         if (it != cameras_.end()) return it->second;
@@ -304,13 +300,9 @@ private:
         // At the screen's resolution the passes' part of a game pixel has nothing left to add.
         if (platform::is_mobile() || canvas_) passes = 1;
         diag_frame();
-#if GT3R_UWP
-        // Xbox (OpenGL ES on ANGLE): one pass too. With the jitter passes' scratch target every
-        // other frame came out wrong (white, or the picture over white from earlier frames across
-        // the whole screen) below 200% render scale, while every step read back was right.
-        // GT3R_SHOWROOM bit 8 brings the 4 passes back (tests).
-        if (!(cap2d_.bits & 8)) passes = 1;
-#endif
+        // (The Xbox drew one pass here while the jitter passes came out wrong on it, white or an
+        // earlier picture across the whole screen: a frame shown before its 3D work reached the
+        // 2D renderer, fixed by gpu_gles finish_submits. GT3R_SHOWROOM bit 1 still forces one.)
         if (cap2d_.bits & 1) passes = 1;
         if (show_.key != entry) {
             show_ = Showroom{};
@@ -634,8 +626,8 @@ private:
         int passes = canvas_ && prize_->focus() <= 1 ? 1 : trophy ? 4 : 6;
 #if GT3R_UWP
         diag_frame();
-        if (!(cap2d_.bits & 8)) passes = 1; // as the car pages' showroom (Xbox: see showroom())
 #endif
+        if (cap2d_.bits & 1) passes = 1; // as the car pages' showroom
         InPicture in_picture(canvas_, r);
         composite(
             r, area,
