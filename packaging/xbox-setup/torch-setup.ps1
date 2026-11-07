@@ -8,6 +8,16 @@
 # tools\. Needs Python 3.10-3.13 (winget install Python.Python.3.13). Safe to run again.
 [CmdletBinding()]
 param()
+# Windows PowerShell 5 (powershell.exe, or .\script.ps1 from it): this needs PowerShell 7 (pwsh).
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) { throw "PowerShell 7 is needed: winget install Microsoft.PowerShell, then a new terminal" }
+    $pass = foreach ($k in $PSBoundParameters.Keys) {
+        $v = $PSBoundParameters[$k]
+        if ($v -is [switch]) { if ($v) { "-$k" } } else { "-$k"; "$v" }
+    }
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath @pass
+    exit $LASTEXITCODE
+}
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 $tools = Join-Path $root "tools"

@@ -58,6 +58,16 @@ param(
     [int]$Tile = 256,
     [string]$Work # the folder with the dumps and the packs made (default: this script's)
 )
+# Windows PowerShell 5 (powershell.exe, or .\script.ps1 from it): this needs PowerShell 7 (pwsh).
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) { throw "PowerShell 7 is needed: winget install Microsoft.PowerShell, then a new terminal" }
+    $pass = foreach ($k in $PSBoundParameters.Keys) {
+        $v = $PSBoundParameters[$k]
+        if ($v -is [switch]) { if ($v) { "-$k" } } else { "-$k"; "$v" }
+    }
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath @pass
+    exit $LASTEXITCODE
+}
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 $data = if ($Work) { (New-Item -Force -ItemType Directory $Work).FullName } else { $root }
