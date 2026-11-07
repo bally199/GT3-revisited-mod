@@ -1,5 +1,7 @@
 #include "menu/flow/menu_set.h"
 
+#include <SDL3/SDL_timer.h>
+
 #include "base/log.h"
 #include "vfs/vfs.h"
 
@@ -30,8 +32,11 @@ const MenuScene* MenuSet::scene(int n) const {
     if (it != scenes_.end()) return it->second.get();
     std::unique_ptr<MenuScene> s;
     std::string path = pmb_path(n);
+    const u64 t0 = SDL_GetTicksNS();
     try {
         if (auto data = reader_(path)) s = std::make_unique<MenuScene>(MenuScene::load(*data, path));
+        if (s) LOG_INFO("menu: %s loaded in %.0f ms (%zu images)", path.c_str(), double(SDL_GetTicksNS() - t0) / 1e6,
+                        s->images().size());
         else LOG_WARN("menu: cannot load [%s]", path.c_str());
         if (s && menu_patches().layout) menu_patches().layout(name_, n, reader_, *s);
     } catch (const std::exception& e) {

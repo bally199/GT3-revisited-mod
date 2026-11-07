@@ -2,6 +2,7 @@
 
 #include "menu/menu_canvas.h"
 #include "menu/menu_text.h"
+#include "base/log.h"
 
 #include <algorithm>
 #include <atomic>
@@ -129,6 +130,7 @@ std::vector<SDL_Texture*> MenuRenderer::upload(const MenuScene* scene) {
     const ImagePack& pack = image_pack();
     const std::vector<MenuImage>& images = scene->images();
     std::vector<std::optional<MenuImage>> found(images.size());
+    const u64 t0 = SDL_GetTicksNS();
     if (pack && !images.empty()) {
         std::atomic<size_t> next{0};
         auto work = [&] {
@@ -146,6 +148,8 @@ std::vector<SDL_Texture*> MenuRenderer::upload(const MenuScene* scene) {
         work();
         for (std::thread& h : helpers) h.join();
     }
+    const u64 t1 = SDL_GetTicksNS();
+    size_t hd_count = 0, hd_bytes = 0;
     for (size_t index = 0; index < images.size(); ++index) {
         const MenuImage& img = images[index];
         SDL_Texture* t = nullptr;
@@ -166,11 +170,16 @@ std::vector<SDL_Texture*> MenuRenderer::upload(const MenuScene* scene) {
                 SDL_UpdateTexture(t, nullptr, use->rgba.data(), int(use->width * 4));
                 SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
                 SDL_SetTextureScaleMode(t, SDL_SCALEMODE_LINEAR);
-                if (hd) hd_.insert(t);
+                if (hd) hd_.insert(t), ++hd_count, hd_bytes += hd->rgba.size() * 4;
             }
         }
         out.push_back(t);
     }
+    // (How long a page's art takes to be ready: the replacements' reading and decoding, then the
+    // textures made from them.)
+    if (hd_count)
+        LOG_INFO("menu art: %zu images, %zu HD (%.0f MB): replacements %.0f ms, textures %.0f ms", images.size(),
+                 hd_count, double(hd_bytes) / 1048576.0, double(t1 - t0) / 1e6, double(SDL_GetTicksNS() - t1) / 1e6);
     return out;
 }
 
