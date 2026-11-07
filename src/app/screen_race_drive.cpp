@@ -329,8 +329,10 @@ void RaceScreen::tick(App& app, const PadState& pad) {
             ffb_car2_ = std::max(ffb_car2_, std::fabs(field_->second_car_impulse()));
         }
     }
-    // Start countdown beeps: count_d at 3, 2, 1, count_s at the start signal.
-    if ((field_ || tt_start_.countdown > 0) && !replaying_ && !backdrop_) {
+    // Start countdown beeps: count_d at 3, 2, 1, count_s at the start signal. Live runs only
+    // (presentation §B2): not in replays, demonstrations (the licence's, its preview box: no
+    // car sounds either), the attract demo or a menu backdrop.
+    if ((field_ || tt_start_.countdown > 0) && live_view()) {
         double t = field_ ? field_->race_time() : (tt_hold_ > 0 ? -tt_hold_ : race_time_ + 1.0);
         int c = t < 0 ? int(std::ceil(-t)) : 0;
         if (rolling_) c = t < kRollingAutoDrive ? 4 : 0; // START (count_s) at the hand-over only

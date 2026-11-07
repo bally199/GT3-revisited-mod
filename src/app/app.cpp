@@ -33,8 +33,10 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <list>
 #include <mutex>
 #include <set>
+#include <unordered_map>
 
 #if GT3R_UWP && GT3R_GLES
 #include <SDL3/SDL_loadso.h>
@@ -599,7 +601,17 @@ void App::apply_texture_packs() {
         std::set<std::string> names;
     };
     auto dumped = std::make_shared<Dumped>();
-    menu::MenuRenderer::set_image_pack([this, menu_dump, packs, dumped](const menu::MenuImage& img)
+    // The replacements decoded lately, kept (the most recently used first) up to a budget: going
+    // back to a page takes them from memory instead of reading and decoding the PNGs again.
+    struct Decoded {
+        std::mutex mutex;
+        std::list<std::string> order;
+        std::unordered_map<std::string, std::pair<menu::MenuImage, std::list<std::string>::iterator>> images;
+        size_t bytes = 0;
+    };
+    constexpr size_t kDecodedBudget = size_t(384) << 20;
+    auto decoded = std::make_shared<Decoded>();
+    menu::MenuRenderer::set_image_pack([this, menu_dump, packs, dumped, decoded](const menu::MenuImage& img)
                                            -> std::optional<menu::MenuImage> {
         if (!gpu_ || img.rgba.size() < size_t(img.width) * img.height) return std::nullopt;
         const std::string name = render::GpuContext::texture_pack_name(
@@ -616,10 +628,35 @@ void App::apply_texture_packs() {
         if (!packs) return std::nullopt;
         const std::string* file = gpu_->texture_pack_file(name);
         if (!file) return std::nullopt;
+        {
+            std::lock_guard lock(decoded->mutex);
+            auto it = decoded->images.find(name);
+            if (it != decoded->images.end()) {
+                decoded->order.splice(decoded->order.begin(), decoded->order, it->second.second);
+                return it->second.first;
+            }
+        }
         try {
             if (std::optional<Bytes> data = read_host_file(*file)) {
                 PngImage png = decode_png(*data);
-                if (png.width && png.height) return menu::MenuImage{png.width, png.height, std::move(png.rgba)};
+                if (!png.width || !png.height) return std::nullopt;
+                menu::MenuImage hd{png.width, png.height, std::move(png.rgba)};
+                const size_t size = hd.rgba.size() * sizeof(hd.rgba[0]);
+                if (size <= kDecodedBudget / 4) {
+                    std::lock_guard lock(decoded->mutex);
+                    if (!decoded->images.count(name)) {
+                        decoded->order.push_front(name);
+                        decoded->images.emplace(name, std::make_pair(hd, decoded->order.begin()));
+                        decoded->bytes += size;
+                        while (decoded->bytes > kDecodedBudget && decoded->order.size() > 1) {
+                            auto old = decoded->images.find(decoded->order.back());
+                            decoded->bytes -= old->second.first.rgba.size() * sizeof(old->second.first.rgba[0]);
+                            decoded->images.erase(old);
+                            decoded->order.pop_back();
+                        }
+                    }
+                }
+                return hd;
             }
         } catch (const std::exception& e) {
             LOG_WARN("Texture pack: %s: %s", file->c_str(), e.what());
