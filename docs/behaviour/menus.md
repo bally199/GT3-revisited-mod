@@ -542,7 +542,9 @@ element's box (0 top-left … 4 center … 8 bottom-right; values above 8 count
 as center). Two align flags animate text (`apply_text_effects`):
 
 - **0x10, marquee.** The text enters from the box's right edge and scrolls
-  left by one box width every 240 frames, clipped to the box. It restarts once
+  left by one box width every 240 frames, clipped to the box. It runs along
+  the middle of the box, whatever row the anchor names (the dealers' maker
+  tickers `title_jpn2` …, align 0x17, sit centred in their bars on the PS2). It restarts once
   it has passed completely. The period is (box width + text width). The text
   width is estimated as bytes × font size × x-scale × ½ rather than measured,
   so it is approximate.

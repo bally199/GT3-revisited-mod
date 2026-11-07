@@ -329,6 +329,15 @@ void MenuRenderer::draw_element(const Element& e, const std::vector<SDL_Texture*
             cut.text.resize(size_t(t.text_bytes));
             req.style = &cut;
         }
+        // A marquee runs along the middle of its box whatever row its anchor names: the dealers'
+        // maker tickers (title_jpn2 ..., align 0x17: bottom centre) sit centred in their bars
+        // on the PS2.
+        if (t.text_clip) {
+            if (req.style != &cut) cut = *req.style;
+            const int a = cut.align & 0x0F;
+            if (a <= 8) cut.align = u16((cut.align & ~0x0F) | (3 + a % 3));
+            req.style = &cut;
+        }
         SDL_Rect old_clip{};
         bool clipped = false;
         if (t.text_clip) {
