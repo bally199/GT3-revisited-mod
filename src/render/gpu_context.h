@@ -179,6 +179,10 @@ public:
     // cull / write combination appears in a session. Not on OpenGL ES (its objects belong to
     // the context, on the main thread).
     void warm_pipelines();
+    // OpenGL ES (one context, no warming thread): the same pipelines built here and now, once
+    // (again after an MSAA change), at a point that waits anyway (a race's loading). Otherwise the
+    // first draw needing one stalled its frame, up to ~400 ms on the Xbox.
+    void warm_pipelines_now();
     // no_mips: the full-size image only (GS MXL 0), linear, no anisotropy.
     SDL_GPUSampler* sampler(bool clamp_u, bool clamp_v, bool no_mips = false) const {
         return samplers_[(clamp_u ? 1 : 0) | (clamp_v ? 2 : 0) | (no_mips ? 4 : 0)];
@@ -273,6 +277,7 @@ private:
     std::thread warm_thread_;
     std::atomic<bool> warm_stop_{false};
     bool warm_ = false; // warm_pipelines was asked for (again after an MSAA change)
+    bool warmed_now_ = false; // warm_pipelines_now has built them (for this sample count)
     struct TextureKey {
         u32 width, height;
         u64 hash[2]; // two independent 64-bit hashes of the texels

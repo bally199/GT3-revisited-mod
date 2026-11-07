@@ -359,6 +359,7 @@ void GpuContext::set_msaa(int samples) {
         SDL_WaitForGPUIdle(device_);
         release_pipelines();
         samples_ = want;
+        warmed_now_ = false;
         if (warm_) warm_pipelines(); // the sample count is part of every pipeline
     }
 }
@@ -493,6 +494,18 @@ void GpuContext::warm_pipelines() {
         }
         LOG_INFO("3D pipelines warmed: %d in %.0f ms", made, double(SDL_GetTicksNS() - t0) / 1e6);
     });
+}
+
+void GpuContext::warm_pipelines_now() {
+    if (!gles_ || warmed_now_) return;
+    warmed_now_ = true;
+    const u64 t0 = SDL_GetTicksNS();
+    int made = 0;
+    for (const PipelineKey& k : warm_keys()) {
+        if (k.spin_copy && !spin_copies()) continue;
+        made += build_pipeline(k);
+    }
+    LOG_INFO("3D pipelines warmed: %d in %.0f ms", made, double(SDL_GetTicksNS() - t0) / 1e6);
 }
 
 bool GpuContext::build_pipeline(const PipelineKey& key) {

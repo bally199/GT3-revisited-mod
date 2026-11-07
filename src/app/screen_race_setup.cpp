@@ -302,6 +302,7 @@ void RaceScreen::start(App& app, const Replay* replay) {
     else if (!replay && preset_.prerace)
         open_prerace_menu(app);
     if (preset_.demo && !replay) start_demo();
+    if (app.gpu()) app.gpu()->warm_pipelines_now(); // (OpenGL ES: once, in the loading's wait)
     LOG_INFO("Race: loaded in %.0f ms",
              double(SDL_GetPerformanceCounter() - t0) * 1000.0 / double(SDL_GetPerformanceFrequency()));
     if (debug_) {
