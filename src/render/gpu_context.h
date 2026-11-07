@@ -23,12 +23,18 @@
 
 #include <atomic>
 #include <map>
+#include <unordered_map>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <string>
 #include <thread>
 #include <vector>
+
+namespace gt3r {
+struct PngImage;
+}
 
 namespace gt3r::render {
 
@@ -205,6 +211,14 @@ public:
     // The content part of a name: FNV-1a over the texels (for images made by other means, the
     // menus' art, to name them the same way).
     static u64 texture_pack_hash(const u32* rgba, size_t count);
+    // A model's textures about to go through acquire_texture: their pack replacements read and
+    // decoded now, several at a time, instead of one after another there (most of a car page's
+    // or a race's loading with an HD pack).
+    struct TextureSource {
+        u32 width = 0, height = 0;
+        const u32* rgba = nullptr;
+    };
+    void prefetch_textures(const std::vector<TextureSource>& textures);
     // A pack's PNG for `name` (set_texture_packs), or nullptr.
     const std::string* texture_pack_file(const std::string& name) const {
         auto it = pack_files_.find(name);
@@ -293,6 +307,17 @@ private:
     std::set<std::string> pack_dumped_;            // names written (or found) in pack_dump_
     std::map<std::string, std::string> pack_files_; // name -> PNG path
     std::set<SDL_GPUTexture*> pack_replaced_;      // uploaded from a pack: never rewritten (take_texture)
+    // Replacements decoded ahead (prefetch_textures) or lately, by name, the most recently used
+    // first, up to kPackDecodedBudget bytes (pack_decoded_mutex_: filled from several threads).
+    struct PackDecoded {
+        std::list<std::string> order;
+        std::unordered_map<std::string, std::pair<std::shared_ptr<const PngImage>, std::list<std::string>::iterator>> images;
+        size_t bytes = 0;
+    };
+    PackDecoded pack_decoded_;
+    std::mutex pack_decoded_mutex_;
+    std::shared_ptr<const PngImage> pack_decoded(const std::string& name);
+    void keep_pack_decoded(const std::string& name, std::shared_ptr<const PngImage> png);
 };
 
 // `texture` (w x h, GpuContext::kColorFormat) as a texture of the context's 2D renderer, drawn

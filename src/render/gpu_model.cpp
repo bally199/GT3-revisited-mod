@@ -129,6 +129,13 @@ GpuModel::GpuModel(GpuContext& ctx, const scene::Model& model, bool keep_geometr
         indices_ = up.buffer(SDL_GPU_BUFFERUSAGE_INDEX, indices.data(), u32(indices.size() * sizeof(u32)));
     }
     if (keep_) geometry_ = {std::move(vertices), std::move(indices)};
+    {
+        std::vector<GpuContext::TextureSource> sources;
+        for (const scene::Texture& t : model.textures)
+            if (t.width && t.height && t.rgba.size() >= size_t(t.width) * t.height)
+                sources.push_back({t.width, t.height, t.rgba.data()});
+        ctx.prefetch_textures(sources);
+    }
     for (const scene::Texture& t : model.textures) {
         TextureInfo ti;
         ti.clamp_u = t.clamp_u;

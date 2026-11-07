@@ -19,6 +19,7 @@
 #include "scene/model.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -714,11 +715,15 @@ SDL_GPUTexture* GpuContext::acquire_texture(Uploader& up, u32 w, u32 h, const u3
         }
         if (auto it = pack_files_.find(name); it != pack_files_.end()) {
             try {
-                if (std::optional<Bytes> file = read_host_file(it->second)) {
-                    const PngImage png = decode_png(*file);
-                    if (png.width && png.height && (t = up.texture_rgba(png.width, png.height, png.rgba.data(), true)))
-                        pack_replaced_.insert(t);
-                }
+                std::shared_ptr<const PngImage> png = pack_decoded(name);
+                if (!png)
+                    if (std::optional<Bytes> file = read_host_file(it->second)) {
+                        png = std::make_shared<const PngImage>(decode_png(*file));
+                        keep_pack_decoded(name, png);
+                    }
+                if (png && png->width && png->height &&
+                    (t = up.texture_rgba(png->width, png->height, png->rgba.data(), true)))
+                    pack_replaced_.insert(t);
             } catch (const std::exception& e) {
                 LOG_WARN("Texture pack: %s: %s", it->second.c_str(), e.what());
             }
@@ -731,6 +736,61 @@ SDL_GPUTexture* GpuContext::acquire_texture(Uploader& up, u32 w, u32 h, const u3
         shared_textures_[t] = {key, 1};
     }
     return t;
+}
+
+namespace {
+constexpr size_t kPackDecodedBudget = size_t(384) << 20;
+} // namespace
+
+std::shared_ptr<const PngImage> GpuContext::pack_decoded(const std::string& name) {
+    std::lock_guard lock(pack_decoded_mutex_);
+    auto it = pack_decoded_.images.find(name);
+    if (it == pack_decoded_.images.end()) return nullptr;
+    pack_decoded_.order.splice(pack_decoded_.order.begin(), pack_decoded_.order, it->second.second);
+    return it->second.first;
+}
+
+void GpuContext::keep_pack_decoded(const std::string& name, std::shared_ptr<const PngImage> png) {
+    if (!png || !png->width) return;
+    const size_t size = png->rgba.size() * sizeof(png->rgba[0]);
+    if (size > kPackDecodedBudget / 8) return;
+    std::lock_guard lock(pack_decoded_mutex_);
+    if (pack_decoded_.images.count(name)) return;
+    pack_decoded_.order.push_front(name);
+    pack_decoded_.images.emplace(name, std::make_pair(std::move(png), pack_decoded_.order.begin()));
+    pack_decoded_.bytes += size;
+    while (pack_decoded_.bytes > kPackDecodedBudget && pack_decoded_.order.size() > 1) {
+        auto old = pack_decoded_.images.find(pack_decoded_.order.back());
+        pack_decoded_.bytes -= old->second.first->rgba.size() * sizeof(old->second.first->rgba[0]);
+        pack_decoded_.images.erase(old);
+        pack_decoded_.order.pop_back();
+    }
+}
+
+void GpuContext::prefetch_textures(const std::vector<TextureSource>& textures) {
+    if (pack_files_.empty() || textures.size() < 2) return;
+    // The names (a pass over each texture's texels) and the decoding, on up to 8 threads.
+    std::atomic<size_t> next{0};
+    auto work = [&] {
+        for (size_t i; (i = next++) < textures.size();) {
+            const TextureSource& t = textures[i];
+            if (!t.width || !t.height || !t.rgba) continue;
+            const std::string name =
+                texture_pack_name(t.width, t.height, texture_pack_hash(t.rgba, size_t(t.width) * t.height));
+            auto it = pack_files_.find(name);
+            if (it == pack_files_.end() || pack_decoded(name)) continue;
+            try {
+                if (std::optional<Bytes> file = read_host_file(it->second))
+                    keep_pack_decoded(name, std::make_shared<const PngImage>(decode_png(*file)));
+            } catch (...) { // (acquire_texture reports it)
+            }
+        }
+    };
+    const unsigned n = std::clamp(std::thread::hardware_concurrency(), 1u, 8u);
+    std::vector<std::thread> helpers;
+    for (unsigned k = 1; k < n && k < textures.size(); ++k) helpers.emplace_back(work);
+    work();
+    for (std::thread& h : helpers) h.join();
 }
 
 u64 GpuContext::texture_pack_hash(const u32* rgba, size_t count) {
@@ -757,6 +817,10 @@ void GpuContext::set_texture_packs(const std::string& dump_dir, const std::vecto
         LOG_INFO("Texture dump: new textures to %s", pack_dump_.c_str());
     }
     pack_files_.clear();
+    {
+        std::lock_guard lock(pack_decoded_mutex_);
+        pack_decoded_ = {};
+    }
     auto scan = [&](auto&& self, const std::string& dir, int depth) -> void {
         for (const HostDirEntry& e : host_dir_entries(dir)) {
             if (e.dir) {
