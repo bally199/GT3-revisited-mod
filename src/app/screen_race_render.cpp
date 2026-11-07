@@ -815,6 +815,13 @@ void RaceScreen::render_drive(App& app, Ui& ui) {
     ov.dissolve = dissolve_.weight();
     ov.trail = std::floor(128.0f * director_.look().trail_weight()) / 128.0f;
     if (!split) apply_depth_of_field(ov);
+    // Testing switches (args.txt): GT3R_POST_OFF=<bits> 1 no dissolves, 2 no trail, 4 no depth
+    // of field, 8 no picture kept between frames (with 1 and 2).
+    static const int post_off = [] { const char* e = SDL_getenv("GT3R_POST_OFF"); return e ? std::atoi(e) : 0; }();
+    if (post_off & 1) ov.snapshot = false, ov.dissolve = 0;
+    if (post_off & 2) ov.trail = 0;
+    if (post_off & 4) ov.dof = {};
+    if (post_off & 8) ov.keep_last = false;
     // The passes between the scene and the grade (the glare and lamp glows inside the picture, the
     // heat haze) and the vignette (presentation §L6).
     const float sun_v = sun_visibility(eye, camera_.fovy(), rect.h);
