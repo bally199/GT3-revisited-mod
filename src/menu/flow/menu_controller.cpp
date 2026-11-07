@@ -129,10 +129,6 @@ void apply_text_effects(ElementDraw& d, const Element& e, u32 age) {
         // The text enters from the box's right edge (the reference tickers).
         d.text_dx = e.w - off;
         d.text_clip = true;
-        static std::set<std::string> logged; // (once per element: its box and style, for checking its placement)
-        if (logged.insert(e.name + "|" + t.font).second)
-            LOG_INFO("menu: marquee %s box (x %.1f y %.1f w %.1f h %.1f) align 0x%02x font %s", e.name.c_str(), e.x, e.y,
-                     e.w, e.h, unsigned(t.align), t.font.c_str());
     }
     if (t.align & 0x20) {
         // Count characters: game encoding uses two bytes for EUC-JP and
@@ -952,14 +948,6 @@ void MenuController::add_level_draws(std::vector<ElementDraw>& out, const Level&
                 box_override.box = {window->x + row_offset(lv, target) + xs[size_t(i)], window->y + (window->h - e.h) * 0.5f,
                                     e.w, e.h};
                 cy = window->y + window->h * 0.5f;
-                if (i == 0) { // (once per page: where the row goes, for checking against the disc's look)
-                    static std::set<std::string> logged;
-                    if (logged.insert(lv.name).second)
-                        LOG_INFO("menu: [%s] horizontal row in %s (x %.1f y %.1f w %.1f h %.1f); item %s (x %.1f y %.1f "
-                                 "w %.1f h %.1f) placed at y %.1f",
-                                 lv.name.c_str(), window->name.c_str(), window->x, window->y, window->w, window->h,
-                                 e.name.c_str(), e.x, e.y, e.w, e.h, box_override.box.y);
-                }
             }
             box_override.has_clip = true;
             box_override.clip = {window->x, window->y, window->w, window->h};

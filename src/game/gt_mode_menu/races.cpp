@@ -255,8 +255,11 @@ std::optional<GameRequest> resume_request() {
 
 // Attract mode: the title idle time and the demos' time limit (gcf section 0) and the
 // demo races (gcf section 12, cycling; the F1 demos only once the S license is held).
+// Testing switches: GT3R_ATTRACT_IDLE=<seconds> instead of the disc's idle time,
+// GT3R_ATTRACT=<event or course> (demo_maze, tahitimaze ...) for every demo.
 int attract_idle_frames() {
     const MenuState& ms = menu_state();
+    if (const char* idle = std::getenv("GT3R_ATTRACT_IDLE"); idle && *idle) return std::max(1, std::atoi(idle)) * 60;
     return ms.data ? ms.data->title_idle_seconds * 60 : 0;
 }
 
@@ -264,10 +267,12 @@ std::optional<GameRequest> attract_demo() {
     MenuState& ms = menu_state();
     if (!ms.data || ms.data->demos.empty()) return std::nullopt;
     bool s_license = S() && S()->gt().license_held(4);
+    const char* only = std::getenv("GT3R_ATTRACT");
+    if (only && !*only) only = nullptr;
     for (size_t tries = 0; tries < ms.data->demos.size(); ++tries) {
         ms.attract_index = (ms.attract_index + 1) % ms.data->demos.size();
         const GtData::Demo& d = ms.data->demos[ms.attract_index];
-        if (d.level > (s_license ? 1 : 0)) continue;
+        if (only ? d.event != only && d.course != only : d.level > (s_license ? 1 : 0)) continue;
         GameRequest r;
         r.mode = "attract_demo";
         r.race_code = r.event = d.event;
