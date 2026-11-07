@@ -24,6 +24,7 @@ const char kOptions[] = R"(Usage: gt3r [disc.iso|disc.chd] [options]
   --hub                  start in Developer options ([app] start = hub)
   --browse <vol path>    open the asset browser on a file in GT3.VOL
   --shot <out.png>       save frame 30 (GT3R_SHOT_FRAME) as a PNG and quit
+  --dump-all             dump every texture, menu image and font for HD packs, then quit
   --msaa <n>             MSAA sample count ([video] msaa)
   --render-scale <s>     auto or 0.5..4.0 ([video] render_scale)
   --no-gpu               the 2D renderer only, no 3D ([video] gpu = 0)

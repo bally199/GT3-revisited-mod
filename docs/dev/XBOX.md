@@ -4,6 +4,21 @@ GT3 Revisited as a UWP app for Xbox Series X|S in Developer Mode: the same game,
 the TV, with Xbox pads. **Status: runs on an Xbox Series S** (menus, movies, races, sound, pads,
 the disc from a USB drive); the notes below are what it took.
 
+## The easy way: the setup
+
+For players, not builders: a release (Actions → xbox-uwp → Run workflow, "release" ticked)
+publishes `GT3R-Xbox-Setup.zip` (`packaging/xbox-setup`). Unzipped on a Windows PC, drag the disc
+image onto `Setup.bat`: it checks the image, installs the latest package and its VCLibs
+dependency through Device Portal, makes a USB drive readable by the console (formatting it NTFS
+if needed, after asking) and copies the image onto it, and optionally makes HD texture packs
+from the disc on that PC: the release's Windows build dumps every texture, menu image and font
+(`gt3r <disc> --dump-all`, into `GT3R_DATA_DIR`), `hd-pack.ps1 -Textures -Menus -Fonts -Torch`
+upscales them (NVIDIA cards), and they go into the game's `textures\hd-*` folders on the console.
+Run again, it skips what is done (`setup-state.json`). The steps below are what it automates.
+
+Set the repository secrets `GT3R_UWP_PFX` (a .pfx, base64) and `GT3R_UWP_PFX_PASSWORD` to sign
+every release with the same certificate; without them each release has a new throwaway one.
+
 ## How it works
 
 | Piece | What it does |

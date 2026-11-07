@@ -319,6 +319,7 @@ private:
 
     bool screenshot_requested_ = false;
     std::string auto_shot_path_; // --shot: capture after a few frames, then exit
+    bool dump_all_ = false;      // --dump-all: the texture tour, then exit
     int frame_ = 0;
     // 3D resolution: [video] render_scale (or --render-scale) and the dynamic scale under it.
     float configured_scale_ = 1;

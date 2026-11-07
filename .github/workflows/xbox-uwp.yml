@@ -4,11 +4,24 @@ name: xbox-uwp
 # touch the UWP files. It is signed with a throwaway
 # self-signed certificate made here; the artifact holds the .msix, its .cer and the VCLibs framework package that Device Portal also needs.
 # ANGLE for UWP (packaging/uwp/angle-uwp.ps1, 20-30 min) is kept in the cache.
+#
+# Release (a manual run with "release" ticked): also the Windows PC build (the setup's HD step
+# dumps the textures with it, --dump-all) and the setup folder (packaging/xbox-setup), published
+# as a GitHub release xbox-r<run> under stable names that packaging/xbox-setup/setup.ps1 fetches
+# from the latest release: gt3r-xbox.msix, Microsoft.VCLibs.x64.14.00.appx, gt3r-windows-x64.zip,
+# GT3R-Xbox-Setup.zip. Signing: the repository secrets GT3R_UWP_PFX (the .pfx, base64) and
+# GT3R_UWP_PFX_PASSWORD when set (the same certificate each release, so a release installs over the
+# last), else a throwaway certificate.
 
 on:
   # Manual runs (Actions > xbox-uwp > Run workflow) and pull requests that touch the UWP files;
   # day to day the package is built on a Windows PC (docs/dev/XBOX.md).
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish a release (the package, the PC build and the setup)
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'cmake/Uwp.cmake'
@@ -39,9 +52,19 @@ jobs:
         with:
           path: angle-uwp
           key: angle-uwp-${{ hashFiles('packaging/uwp/angle-uwp.ps1', 'packaging/uwp/angle-*.patch') }}
-      - name: Signing certificate (self-signed, this run only)
+      - name: Signing certificate (the repository's, else self-signed for this run only)
         shell: pwsh
-        run: ./packaging/uwp/make-cert.ps1 -Out "$env:RUNNER_TEMP\gt3r-dev.pfx" -Password gt3r
+        env:
+          PFX: ${{ secrets.GT3R_UWP_PFX }}
+          PFX_PASSWORD: ${{ secrets.GT3R_UWP_PFX_PASSWORD }}
+        run: |
+          if ($env:PFX) {
+            [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\gt3r-dev.pfx", [Convert]::FromBase64String($env:PFX))
+            "CERT_PASSWORD=$env:PFX_PASSWORD" | Out-File -Append $env:GITHUB_ENV
+          } else {
+            ./packaging/uwp/make-cert.ps1 -Out "$env:RUNNER_TEMP\gt3r-dev.pfx" -Password gt3r
+            "CERT_PASSWORD=gt3r" | Out-File -Append $env:GITHUB_ENV
+          }
       # Each -D argument in quotes: PowerShell splits an unquoted -DNAME=10.0 at the dot.
       - name: Configure
         shell: pwsh
@@ -49,7 +72,7 @@ jobs:
           cmake -S . -B build-uwp -G "Visual Studio 17 2022" -A x64
           "-DCMAKE_SYSTEM_NAME=WindowsStore" "-DCMAKE_SYSTEM_VERSION=10.0"
           "-DGT3R_ANGLE_DIR=$PWD/angle-uwp"
-          "-DGT3R_UWP_CERT=$env:RUNNER_TEMP\gt3r-dev.pfx" "-DGT3R_UWP_CERT_PASSWORD=gt3r"
+          "-DGT3R_UWP_CERT=$env:RUNNER_TEMP\gt3r-dev.pfx" "-DGT3R_UWP_CERT_PASSWORD=$env:CERT_PASSWORD"
           "-DGT3R_UWP_BUILD=${{ github.run_number }}"
       - name: Build and package
         run: cmake --build build-uwp --config Release --target gt3r -- /m
@@ -58,3 +81,70 @@ jobs:
           name: gt3r-xbox-uwp
           path: build-uwp/AppPackages/
           if-no-files-found: error
+
+  # The Windows PC build, for the setup's HD step (gt3r.exe --dump-all).
+  windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.release
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: ANGLE (Windows, cached)
+        id: angle
+        uses: actions/cache/restore@v4
+        with:
+          path: angle
+          key: angle-windows-${{ hashFiles('packaging/angle.ps1', 'packaging/vcpkg-triplets/**') }}
+      - name: ANGLE (Windows)
+        if: steps.angle.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./packaging/angle.ps1
+      - name: Save ANGLE (Windows)
+        if: steps.angle.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: angle
+          key: angle-windows-${{ hashFiles('packaging/angle.ps1', 'packaging/vcpkg-triplets/**') }}
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGT3R_FETCH_SDL=ON -DGT3R_BUILD_TESTS=OFF -DGT3R_SDL_SHARED=ON "-DGT3R_ANGLE_DIR=$GITHUB_WORKSPACE/angle"
+      - name: Build
+        run: cmake --build build --config Release --parallel 4 --target gt3r
+      - name: Install and archive
+        shell: pwsh
+        run: |
+          cmake --install build --config Release --prefix dist/gt3r-windows-x64
+          Compress-Archive -Path dist/gt3r-windows-x64 -DestinationPath gt3r-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gt3r-windows-x64
+          path: gt3r-windows-x64.zip
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'workflow_dispatch' && inputs.release
+    needs: [uwp, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect the files under their stable names
+        run: |
+          set -e
+          mkdir release
+          cp "$(find artifacts/gt3r-xbox-uwp -name '*.msix' | head -1)" release/gt3r-xbox.msix
+          cp "$(find artifacts/gt3r-xbox-uwp -path '*x64*' -name 'Microsoft.VCLibs.x64.14.00.appx' | head -1)" release/Microsoft.VCLibs.x64.14.00.appx
+          cp artifacts/gt3r-windows-x64/gt3r-windows-x64.zip release/
+          (cd packaging && zip -r -X ../release/GT3R-Xbox-Setup.zip xbox-setup -x 'xbox-setup/work/*' 'xbox-setup/downloads/*')
+          (cd release && sha256sum * > SHA256SUMS)
+          ls -l release
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "xbox-r${{ github.run_number }}" release/* --target "${{ github.sha }}" --latest \
+            --title "GT3 Revisited for Xbox (build ${{ github.run_number }})" \
+            --notes "Download GT3R-Xbox-Setup.zip, unzip it, and drag your own GT3 disc image onto Setup.bat (README.txt inside). No game data is included."

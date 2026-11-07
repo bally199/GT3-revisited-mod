@@ -357,6 +357,7 @@ bool App::init(int argc, char** argv) {
         else if (a == "--screen" && has_value) screen = args[++i];
         else if ((a == "--msaa" || a == "--render-scale") && has_value) ++i;
         else if (a == "--hub") hub = true;
+        else if (a == "--dump-all") dump_all_ = true;
         else if (a == "--env" && has_value) { // NAME=value: the testing variables on platforms without them (Android)
             const std::string& kv = args[++i];
             size_t eq = kv.find('=');
@@ -373,13 +374,28 @@ bool App::init(int argc, char** argv) {
     UWP_STEP("disc");
     if (!disc_path.empty()) last_error_ = open_disc(disc_path);
     else open_saved_disc(config_.get("game", "disc").value_or(""));
+    // --dump-all: every texture, menu image and font atlas into the data folder's dumps (the
+    // texture tour), then exit (status 1 when that cannot run): for making HD packs on a PC
+    // (packaging/xbox-setup), with GT3R_DATA_DIR naming the folder.
+    if (dump_all_) {
+        if (!disc_ || !gpu_) {
+            LOG_ERROR("--dump-all: %s", !disc_ ? (last_error_.empty() ? "no disc image" : last_error_.c_str())
+                                               : "no 3D renderer");
+            return false;
+        }
+        start_texture_tour();
+        if (tour_jobs_.empty()) {
+            LOG_ERROR("--dump-all: nothing to dump");
+            return false;
+        }
+    }
     UWP_STEP("screens");
     push(disc_ ? make_hub_screen() : make_setup_screen());
     // Normal start is the game itself (opening movie, then the title menu);
     // the home menu sits underneath (backing out of the title menu shows it).
     // --hub or [app] start = hub opens Developer options instead.
     if (disc_ && hub && browse.empty() && screen.empty()) push(make_developer_screen());
-    else if (disc_ && browse.empty() && screen.empty()) push_game_start();
+    else if (disc_ && browse.empty() && screen.empty() && !dump_all_) push_game_start();
     if (disc_ && !browse.empty()) push(make_browser_screen(browse));
     if (!screen.empty())
         for (const ScreenEntry& entry : screen_registry())
@@ -756,7 +772,10 @@ void App::texture_tour_step() {
         job();
         if (++tour_done_ % 100 == 0 || tour_jobs_.empty())
             LOG_INFO("Texture tour: %d of %d", tour_done_, tour_total_);
-        if (tour_jobs_.empty()) LOG_INFO("Texture tour: done");
+        if (tour_jobs_.empty()) {
+            LOG_INFO("Texture tour: done");
+            if (dump_all_) quit_ = true;
+        }
     }
 }
 
