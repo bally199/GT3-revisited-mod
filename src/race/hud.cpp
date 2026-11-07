@@ -4,6 +4,7 @@
 #include "formats/gs_memory.h"
 #include "formats/menu/imgs.h"
 #include "formats/tex1.h"
+#include "menu/menu_renderer.h"
 #include "race/time_text.h"
 #include "vfs/vfs.h"
 
@@ -67,6 +68,25 @@ SDL_Texture* make_texture(SDL_Renderer* r, u32 w, u32 h, const std::vector<u32>&
     SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
     SDL_SetTextureScaleMode(t, SDL_SCALEMODE_LINEAR);
     return t;
+}
+
+// The HUD's art with its HD replacement when the texture packs have one (the menus' hook:
+// dumped into menu_dump, replaced from textures/). The layout keeps the original's size.
+SDL_Texture* make_hd_texture(SDL_Renderer* r, u32 w, u32 h, const std::vector<u32>& rgba, int* hd_count = nullptr) {
+    if (const menu::MenuRenderer::ImagePack& pack = menu::MenuRenderer::image_pack();
+        pack && rgba.size() >= size_t(w) * h) {
+        try {
+            std::optional<menu::MenuImage> hd = pack(menu::MenuImage{w, h, rgba});
+            if (hd && hd->width >= w && hd->height >= h && hd->rgba.size() >= size_t(hd->width) * hd->height)
+                if (SDL_Texture* t = make_texture(r, hd->width, hd->height, hd->rgba)) {
+                    if (hd_count) ++*hd_count;
+                    return t;
+                }
+        } catch (const std::exception& e) {
+            LOG_WARN("HUD: HD art: %s", e.what());
+        }
+    }
+    return make_texture(r, w, h, rgba);
 }
 
 void fill(SDL_Renderer* r, float x, float y, float w, float h, SDL_Color c) {
@@ -180,6 +200,7 @@ const HudRow* Hud::event_row(HudMode m, u8 items, int view) {
 
 void Hud::load(const Vfs& vfs, SDL_Renderer* r, const std::string& language) {
     fonts_ok_ = fonts_.load(vfs, r);
+    int hd = 0;
     for (const std::string& lang : {language, std::string("US"), std::string("UK"), std::string("JP")}) {
         std::optional<Bytes> data = vfs.read("race/" + lang + "/display.imgs");
         if (!data || !menu::Imgs::is_imgs(*data)) continue;
@@ -200,7 +221,7 @@ void Hud::load(const Vfs& vfs, SDL_Renderer* r, const std::string& language) {
                         dst = {make_texture(r, img.width, img.height, px), float(img.width), float(img.height)};
                     }
                 }
-                if (SDL_Texture* t = make_texture(r, img.width, img.height, img.rgba))
+                if (SDL_Texture* t = make_hd_texture(r, img.width, img.height, img.rgba, &hd))
                     images_[imgs.entries[i].name] = {t, float(img.width), float(img.height)};
             }
         } catch (const std::exception& e) {
@@ -208,7 +229,7 @@ void Hud::load(const Vfs& vfs, SDL_Renderer* r, const std::string& language) {
         }
         break;
     }
-    LOG_INFO("HUD: %zu display images, fonts %s", images_.size(), fonts_ok_ ? "loaded" : "missing");
+    LOG_INFO("HUD: %zu display images (%d HD), fonts %s", images_.size(), hd, fonts_ok_ ? "loaded" : "missing");
 }
 
 void Hud::set_course_map(SDL_Renderer* r, ByteSpan g) {
@@ -226,7 +247,7 @@ void Hud::set_course_map(SDL_Renderer* r, ByteSpan g) {
         tex.upload(t, gs);
         Tex1::Image img = tex.decode(gs, 0);
         // The map art uses PS2 alpha (0x80 = opaque); decode() already maps it to 0..255.
-        map_.tex = make_texture(r, img.width, img.height, img.rgba);
+        map_.tex = make_hd_texture(r, img.width, img.height, img.rgba);
         map_.w = float(img.width);
         map_.h = float(img.height);
     } catch (const std::exception& e) {
@@ -1147,7 +1168,9 @@ void Hud::draw_split(SDL_Renderer* r, const HudData& d, const SDL_FRect& half, b
         SDL_SetTextureAlphaMod(im->tex, 70);
         SDL_RenderTexture(r, im->tex, nullptr, &dst);
         SDL_SetTextureAlphaMod(im->tex, 255);
-        SDL_FRect src{0, 0, im->w * frac, im->h};
+        float tw = im->w, th = im->h; // (an HD replacement is larger than the layout's size)
+        SDL_GetTextureSize(im->tex, &tw, &th);
+        SDL_FRect src{0, 0, tw * frac, th};
         SDL_FRect lit{dst.x, dst.y, dst.w * frac, dst.h};
         SDL_RenderTexture(r, im->tex, &src, &lit);
         if (horizontal) {

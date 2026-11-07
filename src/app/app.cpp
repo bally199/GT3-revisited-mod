@@ -26,6 +26,8 @@
 #include "video/movie.h"
 #include "race/paint.h"
 #include "race/race_scene.h"
+#include "race/hud.h"
+#include "formats/course/course_file.h"
 
 #include <algorithm>
 #include <atomic>
@@ -742,6 +744,21 @@ void App::start_texture_tour() {
                     LOG_WARN("Texture tour: %s: %s", path.c_str(), e.what());
                 }
             });
+    // The race HUD's art in each language and the courses' mini-maps (menu_dump, as menu art).
+    tour_jobs_.push_back([this] {
+        race::Hud hud;
+        for (int i = 0; menu::kMenuLanguages[i]; ++i) hud.load(*vfs_, renderer_, menu::kMenuLanguages[i]);
+        hud.load(*vfs_, renderer_, "UK");
+        for (const std::string& name : vfs_->list_dir("courses")) {
+            if (name.empty() || name.back() == '/') continue;
+            if (std::optional<Bytes> f = vfs_->read("courses/" + name)) try {
+                    course::CourseFile cf = course::CourseFile::parse(*f);
+                    hud.set_course_map(renderer_, cf.section(*f, course::kSlotCourseMap));
+                } catch (const std::exception& e) {
+                    LOG_WARN("Texture tour: courses/%s map: %s", name.c_str(), e.what());
+                }
+        }
+    });
     // The fonts' glyph atlases (font_dump).
     tour_jobs_.push_back([this] {
         const text::GameFonts::AtlasPack& pack = text::GameFonts::atlas_pack();
@@ -756,7 +773,7 @@ void App::start_texture_tour() {
                 }
     });
     tour_total_ = int(tour_jobs_.size());
-    LOG_INFO("Texture tour: %d courses, car paints, menus and fonts to build", tour_total_);
+    LOG_INFO("Texture tour: %d courses, car paints, menus, HUD and fonts to build", tour_total_);
 }
 
 void App::texture_tour_step() {
