@@ -280,13 +280,26 @@ void RaceScreen::collect_items(const render::Vec3& eye, const sim::Vec3& right, 
         pylons_.add_items(items_, eye, {l[0], l[1], l[2]});
     }
     player_items_[0] = player_items_[1] = items_.size();
+    // A car with the eye inside its body is not drawn: GT3's cars pass, which does not clip,
+    // drops a model whose box reaches past the near plane as it does past the far one (and a
+    // replay's roadside camera on a car's path has the car drive through it, its inside then
+    // filling the screen for a moment).
+    auto eye_inside = [&](const CarVisual* v, const sim::VehicleState& st, const sim::VehicleSetup& su) {
+        if (!v || su.width <= 0.5f || su.height <= 0.5f) return false;
+        const render::Vec3 e = render::inverse(v->body_matrix(st, su)).transform_point(eye);
+        constexpr float m = 0.1f; // (a little outside the body: the near plane's own distance)
+        return std::fabs(e.x) < 0.5f * su.width + m && e.y > -m && e.y < su.height + m &&
+               e.z > su.cog_offset.z - su.cog_front_extent - m && e.z < su.cog_offset.z + su.cog_rear_extent + m;
+    };
+    if (player && !live_view() && eye_inside(car_visual_.get(), render_state_, vehicle_->setup())) player = false;
     if (player) {
         CarLook look = car_look(render_state_, true, 0);
         look.lamp = brake_lamps_.factor(0); look.brake_now = brake_lamps_.now(0);
         car_visual_->add_items(items_, render_state_, vehicle_->setup(), eye, look);
         player_items_[1] = items_.size();
     }
-    if (second && field_ && field_->has_second()) {
+    if (second && field_ && field_->has_second() &&
+        !eye_inside(car2_visual_ ? car2_visual_.get() : car_visual_.get(), render_state2_, field_->second_setup())) {
         const CarVisual* v2 = car2_visual_ ? car2_visual_.get() : car_visual_.get();
         CarLook look = car_look(render_state2_, false, 1);
         look.lamp = brake_lamps_.factor(1); look.brake_now = brake_lamps_.now(1);
@@ -297,6 +310,7 @@ void RaceScreen::collect_items(const render::Vec3& eye, const sim::Vec3& right, 
             if (opp_visuals_[size_t(i)] && i != hidden_opponent_)
             {
                 sim::VehicleState os = interpolate(f->opponent_prev_state(i), f->opponent_state(i), step_.alpha());
+                if (eye_inside(opp_visuals_[size_t(i)].get(), os, f->opponent_setup(i))) continue;
                 CarLook look = car_look(os, false, 2 + size_t(i));
                 look.lamp = brake_lamps_.factor(2 + size_t(i)); look.brake_now = brake_lamps_.now(2 + size_t(i));
                 size_t first = items_.size();
