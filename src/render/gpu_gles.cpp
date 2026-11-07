@@ -81,6 +81,7 @@ namespace {
     X(PFNGLENABLEPROC, glEnable) \
     X(PFNGLENABLEVERTEXATTRIBARRAYPROC, glEnableVertexAttribArray) \
     X(PFNGLFINISHPROC, glFinish) \
+    X(PFNGLFLUSHPROC, glFlush) \
     X(PFNGLFENCESYNCPROC, glFenceSync) \
     X(PFNGLGENQUERIESPROC, glGenQueries) \
     X(PFNGLBEGINQUERYPROC, glBeginQuery) \
@@ -333,7 +334,9 @@ struct SDL_GPUDevice {
     bool angle = true;                // Windows: ANGLE when bundled (off: the driver's OpenGL ES)
     // Diagnostic probes ([video] gles_probe, or GT3R_GLES_PROBE): 1 = clear colours and depth
     // nudged off exact 0 / 1 (the same stored values, but no metadata-only fast clear), 2 =
-    // glFinish after every pass and blit (no GPU-side reordering). For the Xbox's car select.
+    // glFinish after every pass and blit (no GPU-side reordering), 4 = glFlush after every pass
+    // and blit, 8 = glFinish at each command buffer's submit (a 3D view's frame), 16 = glFlush
+    // there. For the Xbox's car select and its garbage frames in replays.
     int probe = 0;
     // frame_fence(): the last presented frame's fence (gone with the context).
     GLsync frame_sync = nullptr;
@@ -873,6 +876,7 @@ void run_pass(SDL_GPURenderPass* pass) {
     restore_defaults();
     glBindFramebuffer(GL_FRAMEBUFFER, GLuint(saved_fb));
     if (dev->probe & 2) glFinish();
+    else if (dev->probe & 4) glFlush();
     check_gl(dev, "a render pass");
     if (cpu0) dev->submit_ns += SDL_GetTicksNS() - cpu0;
 }
@@ -899,8 +903,9 @@ bool angle() { return g_device && g_device->angle; }
 void set_probe(int bits) {
     if (!g_device) return;
     g_device->probe = bits;
-    if (bits) LOG_INFO("OpenGL ES: probes %d (clears off 0 / 1: %s, finish after passes: %s)", bits,
-                       bits & 1 ? "on" : "off", bits & 2 ? "on" : "off");
+    if (bits) LOG_INFO("OpenGL ES: probes %d (clears off 0 / 1: %s, after passes: %s, at submits: %s)", bits,
+                       bits & 1 ? "on" : "off", bits & 2 ? "finish" : bits & 4 ? "flush" : "off",
+                       bits & 8 ? "finish" : bits & 16 ? "flush" : "off");
 }
 
 double gpu_ms() { return g_device ? g_device->gpu_ms : -1; }
@@ -1438,7 +1443,13 @@ bool gt3r_gl_SubmitGPUCommandBuffer(SDL_GPUCommandBuffer* cmd) {
     if (!g_device) return SDL_SubmitGPUCommandBuffer(cmd);
     if (!cmd) return false;
     if (cmd->pass.open) run_pass(&cmd->pass); // not ended: SDL_GPU would reject it; draw what was recorded
+    SDL_GPUDevice* dev = cmd->dev;
     delete cmd;
+    if (dev && (dev->probe & (8 | 16))) {
+        begin_gl(dev);
+        if (dev->probe & 8) glFinish();
+        else glFlush();
+    }
     return true;
 }
 
@@ -1568,6 +1579,7 @@ void gt3r_gl_BlitGPUTexture(SDL_GPUCommandBuffer* cmd, const SDL_GPUBlitInfo* in
     attach(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, nullptr, 0, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, GLuint(saved));
     if (dev->probe & 2) glFinish();
+    else if (dev->probe & 4) glFlush();
 }
 
 void gt3r_gl_GenerateMipmapsForGPUTexture(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* t) {
