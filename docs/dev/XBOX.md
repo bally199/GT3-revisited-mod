@@ -105,6 +105,12 @@ upload the `.iso` there, and pick it from there (the app always reaches its own 
   frame came out wrong on the console (white, or an earlier picture over the whole screen) while
   every step read back was right. `GT3R_SHOWROOM=8` (below) brings the passes back for tests.
 - **No framebuffer discards** (`glInvalidateFramebuffer`): ANGLE makes them real D3D11 discards.
+- **A `glFinish` after each 3D frame** (each submitted command buffer that drew): without it the
+  2D renderer now and then showed a frame whose 3D work had not reached it, in replays most
+  (a car's texture sheet, black or white over the whole screen). A flush was not enough; a
+  finish after every pass also cleared it, a few fps slower. `GT3R_GLES_PROBE` (below) keeps
+  the other variants for tests: 2 finish after every pass and blit, 4 flush there, 8 finish at
+  submits (any platform), 16 flush there.
 
 ## Testing switches
 

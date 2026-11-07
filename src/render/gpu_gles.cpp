@@ -338,6 +338,15 @@ struct SDL_GPUDevice {
     // and blit, 8 = glFinish at each command buffer's submit (a 3D view's frame), 16 = glFlush
     // there. For the Xbox's car select and its garbage frames in replays.
     int probe = 0;
+    // A glFinish at the submit of each command buffer that drew (a 3D view's frame, a picture):
+    // on the Xbox (ANGLE, D3D11) the 2D renderer otherwise now and then showed a frame whose 3D
+    // work had not reached it: a car's texture sheet, black or white over the whole screen in
+    // replays (finish after every pass cleared it too, at a few fps more). Default on UWP.
+#ifdef GT3R_UWP
+    bool finish_submits = true;
+#else
+    bool finish_submits = false;
+#endif
     // frame_fence(): the last presented frame's fence (gone with the context).
     GLsync frame_sync = nullptr;
     // GPU time of each pass and blit (GL_EXT_disjoint_timer_query, Xbox): a time-elapsed query
@@ -521,6 +530,7 @@ struct SDL_GPUCopyPass {
 
 struct SDL_GPUCommandBuffer {
     SDL_GPUDevice* dev = nullptr;
+    bool drew = false; // a render pass, a copy or a blit ran (finish_submits)
     SDL_GPURenderPass pass;
     SDL_GPUCopyPass copy;
     // The latest data pushed to each uniform slot ([0] vertex, [1] fragment) and where it
@@ -802,6 +812,7 @@ void time_frame(SDL_GPUDevice* dev) {
 void run_pass(SDL_GPURenderPass* pass) {
     SDL_GPUCommandBuffer* cmd = pass->cmd;
     SDL_GPUDevice* dev = cmd->dev;
+    cmd->drew = true;
     const Uint64 cpu0 = dev->timing_log ? SDL_GetTicksNS() : 0;
     begin_gl(dev);
     check_gl(dev, "SDL's 2D renderer");
@@ -1444,10 +1455,11 @@ bool gt3r_gl_SubmitGPUCommandBuffer(SDL_GPUCommandBuffer* cmd) {
     if (!cmd) return false;
     if (cmd->pass.open) run_pass(&cmd->pass); // not ended: SDL_GPU would reject it; draw what was recorded
     SDL_GPUDevice* dev = cmd->dev;
+    const bool drew = cmd->drew;
     delete cmd;
-    if (dev && (dev->probe & (8 | 16))) {
+    if (dev && ((drew && dev->finish_submits) || (dev->probe & (8 | 16)))) {
         begin_gl(dev);
-        if (dev->probe & 8) glFinish();
+        if ((drew && dev->finish_submits) || (dev->probe & 8)) glFinish();
         else glFlush();
     }
     return true;
@@ -1544,6 +1556,7 @@ void gt3r_gl_CopyGPUTextureToTexture(SDL_GPUCopyPass* copy, const SDL_GPUTexture
     if (!g_device) return SDL_CopyGPUTextureToTexture(copy, src, dst, w, h, d, cycle);
     if (!copy || !src || !dst || !src->texture || !dst->texture) return;
     SDL_GPUDevice* dev = copy->cmd->dev;
+    copy->cmd->drew = true;
     begin_gl(dev);
     const GLint saved = current_framebuffer();
     glBindFramebuffer(GL_READ_FRAMEBUFFER, dev->scratch_read);
@@ -1564,6 +1577,7 @@ void gt3r_gl_BlitGPUTexture(SDL_GPUCommandBuffer* cmd, const SDL_GPUBlitInfo* in
     if (!cmd || !info || !info->source.texture || !info->destination.texture) return;
     const SDL_GPUBlitRegion &src = info->source, &dst = info->destination;
     SDL_GPUDevice* dev = cmd->dev;
+    cmd->drew = true;
     begin_gl(dev);
     const GLint saved = current_framebuffer();
     const GLuint timer = time_begin(dev);
