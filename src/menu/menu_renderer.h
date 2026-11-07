@@ -10,9 +10,13 @@
 #include <functional>
 #include <memory>
 #include <map>
+#include <optional>
+#include <set>
 #include <vector>
 
 namespace gt3r::menu {
+
+class MenuCanvas;
 
 // Text is drawn through a replaceable hook so the game font (text
 // workstream) can take over from the debug font without touching the
@@ -119,6 +123,18 @@ public:
     // for content that goes on top of the widget's art (GT mode car renders).
     void set_widget_overlay_drawer(WidgetDrawer d) { widget_overlay_ = std::move(d); }
 
+    // The page's picture at the screen's resolution (menu_canvas.h): when it is on, the gauges'
+    // arcs and the art with an HD replacement image are drawn into it, at its resolution, between
+    // the 640 x 448 art (as the 3D models are), instead of into the page.
+    void set_canvas(MenuCanvas* canvas) { canvas_ = canvas; }
+
+    // HD replacements for the menus' images (texture packs, docs/MODDING.md), for every
+    // MenuRenderer: called with each image as it is uploaded; a larger image returned is used in
+    // its place (the elements' texture coordinates are fractions: any size fits).
+    using ImagePack = std::function<std::optional<MenuImage>(const MenuImage&)>;
+    static void set_image_pack(ImagePack pack);
+    static const ImagePack& image_pack();
+
     // Draws `page` so that the 640x448 menu space maps onto `dst`.
     void draw(int page, const SceneOptions& so, const RenderOptions& ro, const SDL_FRect& dst);
 
@@ -132,7 +148,9 @@ private:
     void draw_element(const Element& e, bool widget, const RenderOptions& ro, const SDL_FRect& dst);
     void draw_element(const Element& e, const std::vector<SDL_Texture*>& textures, const ElementDraw& t,
                       const RenderOptions& ro, const SDL_FRect& dst);
-    void draw_effect(const ElementDraw& t, const SDL_FRect& dst);
+    void draw_effect(const ElementDraw& t, const SDL_FRect& dst, bool fine = false);
+    // Whether `d` goes into the canvas's picture (set_canvas).
+    bool sharp(const ElementDraw& d);
     const std::vector<SDL_Texture*>& textures_for(const MenuScene* scene);
     std::vector<SDL_Texture*> upload(const MenuScene* scene);
     void release();
@@ -142,6 +160,8 @@ private:
     const MenuScene* drawing_ = nullptr; // drawing_scene()
     std::vector<SDL_Texture*> textures_;
     std::map<const MenuScene*, std::vector<SDL_Texture*>> cache_;
+    std::set<SDL_Texture*> hd_; // made from an image_pack() replacement
+    MenuCanvas* canvas_ = nullptr;
     TextDrawer text_ = draw_text_debug_font;
     WidgetDrawer widget_;
     WidgetDrawer widget_overlay_;

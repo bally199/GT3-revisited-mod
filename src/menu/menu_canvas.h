@@ -27,14 +27,17 @@ public:
     bool on() const { return w_ > 0; }
 
     // Around a model: the art so far goes into the picture, the render target until model_end.
-    // Then the target is the layer for the art after it.
-    void model_begin(SDL_Renderer* r);
+    // Then the target is the layer for the art after it. `art_since`: false when nothing was
+    // drawn into the layer since the last model_end (it stays transparent: nothing to add).
+    void model_begin(SDL_Renderer* r, bool art_since = true);
     void model_end(SDL_Renderer* r);
 
     // Picture pixels per menu pixel. (Not square: the page is 640 x 448 on a 4:3 screen area.)
     float scale_x() const { return float(w_) / 640.0f; }
     float scale_y() const { return float(h_) / 448.0f; }
     SDL_FRect to_picture(const SDL_FRect& box) const;
+    // The whole page in the picture.
+    SDL_FRect picture_rect() const { return {0, 0, float(w_), float(h_)}; }
 
     // What to show of the last page: the picture, or `page` when it had no model.
     SDL_Texture* shown(SDL_Texture* page) const { return shown_ ? shown_ : page; }

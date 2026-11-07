@@ -46,13 +46,13 @@ void MenuCanvas::end(SDL_Renderer* r) {
     SDL_SetRenderClipRect(r, nullptr); // (MenuRenderer's: it ended on the layer)
 }
 
-void MenuCanvas::model_begin(SDL_Renderer* r) {
+void MenuCanvas::model_begin(SDL_Renderer* r, bool art_since) {
     SDL_Texture* art = drawn_ ? layer_ : page_;
     SDL_SetRenderTarget(r, picture_);
     // (An explicit clip: SDL's GPU renderer can keep the scissor of a smaller target.)
     const SDL_Rect whole{0, 0, w_, h_};
     SDL_SetRenderClipRect(r, &whole);
-    SDL_RenderTexture(r, art, nullptr, nullptr);
+    if (art_since || !drawn_) SDL_RenderTexture(r, art, nullptr, nullptr);
     drawn_ = true;
 }
 

@@ -198,6 +198,14 @@ public:
     // later folders win) is uploaded in its place, at its own size.
     void set_texture_packs(const std::string& dump_dir, const std::vector<std::string>& pack_dirs);
     static std::string texture_pack_name(u32 width, u32 height, u64 hash);
+    // The content part of a name: FNV-1a over the texels (for images made by other means, the
+    // menus' art, to name them the same way).
+    static u64 texture_pack_hash(const u32* rgba, size_t count);
+    // A pack's PNG for `name` (set_texture_packs), or nullptr.
+    const std::string* texture_pack_file(const std::string& name) const {
+        auto it = pack_files_.find(name);
+        return it == pack_files_.end() ? nullptr : &it->second;
+    }
     // Before rewriting a texture's texels: takes it out of the sharing when the caller is its
     // only holder (true; it is then the caller's own, released with release_texture as before).
     // False when others hold it too: the caller needs a texture of its own.

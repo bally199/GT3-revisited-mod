@@ -720,6 +720,12 @@ SDL_GPUTexture* GpuContext::acquire_texture(Uploader& up, u32 w, u32 h, const u3
     return t;
 }
 
+u64 GpuContext::texture_pack_hash(const u32* rgba, size_t count) {
+    u64 h = 14695981039346656037ull; // as acquire_texture's key.hash[0]
+    for (size_t i = 0; i < count; ++i) h = (h ^ rgba[i]) * 1099511628211ull;
+    return h;
+}
+
 std::string GpuContext::texture_pack_name(u32 w, u32 h, u64 hash) {
     char s[64];
     std::snprintf(s, sizeof s, "%ux%u_%016llx", w, h, static_cast<unsigned long long>(hash));

@@ -354,7 +354,7 @@ come from the donor's car file; the shadow is stretched to the car's size.
 
 The 3D models' textures (cars, courses, skies) can be replaced by PNGs of any
 size, matched by what the original texture looks like, so no PS2 formats are
-involved:
+involved. The menus' art works the same way (below).
 
 1. Settings → Video → **Dump textures** on, then play: every texture as it
    loads lands in `texture_dump/` in the data folder, named by its size and
@@ -372,8 +372,17 @@ involved:
 Each replacement is decoded when its texture first loads, so a large pack
 lengthens loading, and it takes video memory at its own size (four times the
 size is sixteen times the memory). Textures the game rewrites as it runs (a few
-animated ones) keep their originals. The 2D menus, the HUD and the movies are
-not covered.
+animated ones) keep their originals. The HUD and the movies are not covered.
+
+**Menu art.** The menu pages' images are dumped into `menu_dump/` instead
+(Dump all textures goes through every menu file of every language too) and
+replaced from the same `textures/` folders. With Settings → Display → Sharp
+cars and prizes in menus on and a screen larger than 640 × 448, an element
+whose image has a replacement is drawn at the screen's resolution between the
+rest of the page's art (as the 3D cars are), and so are the car pages'
+handling / speed / acceleration gauges; the rest stays the 640 × 448 picture.
+Menu images are shown larger than most textures: four times the original suits
+them.
 
 ## HD movies
 

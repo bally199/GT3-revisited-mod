@@ -6,8 +6,11 @@
 #include "base/log.h"
 #include "disc/region.h"
 #include "gt3r_version.h"
+#include "formats/png_reader.h"
 #include "formats/png_writer.h"
 #include "game/gt_mode_menu.h"
+#include "menu/menu_renderer.h"
+#include "menu/menu_scene.h"
 #include "game/gt_save.h"
 #include "game/save_folder.h"
 #include "platform/document_tree.h"
@@ -30,6 +33,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <set>
 
 #if GT3R_UWP && GT3R_GLES
 #include <SDL3/SDL_loadso.h>
@@ -584,6 +588,34 @@ void App::apply_texture_packs() {
     video::set_hd_movie_folder(data_dir_ + "movies_hd");
     gpu_->set_texture_packs(dump ? data_dir_ + "texture_dump" : std::string(),
                             packs ? std::vector<std::string>{data_dir_ + "textures"} : std::vector<std::string>{});
+    // The menus' art: named the same way, dumped into its own folder (menu_dump: the pictures
+    // are shown larger than the 3D textures, so they are upscaled further), replaced from the
+    // same packs (textures\menu, say).
+    const std::string menu_dump = dump ? data_dir_ + "menu_dump/" : std::string();
+    if (dump) host_make_dir(menu_dump);
+    auto dumped = std::make_shared<std::set<std::string>>();
+    menu::MenuRenderer::set_image_pack([this, menu_dump, packs, dumped](const menu::MenuImage& img)
+                                           -> std::optional<menu::MenuImage> {
+        if (!gpu_ || img.rgba.size() < size_t(img.width) * img.height) return std::nullopt;
+        const std::string name = render::GpuContext::texture_pack_name(
+            img.width, img.height, render::GpuContext::texture_pack_hash(img.rgba.data(), size_t(img.width) * img.height));
+        if (!menu_dump.empty() && dumped->insert(name).second) {
+            const std::string path = menu_dump + name + ".png";
+            if (!host_path_exists(path)) write_host_file(path, encode_png(img.width, img.height, img.rgba));
+        }
+        if (!packs) return std::nullopt;
+        const std::string* file = gpu_->texture_pack_file(name);
+        if (!file) return std::nullopt;
+        try {
+            if (std::optional<Bytes> data = read_host_file(*file)) {
+                PngImage png = decode_png(*data);
+                if (png.width && png.height) return menu::MenuImage{png.width, png.height, std::move(png.rgba)};
+            }
+        } catch (const std::exception& e) {
+            LOG_WARN("Texture pack: %s: %s", file->c_str(), e.what());
+        }
+        return std::nullopt;
+    });
 }
 
 void App::start_texture_tour() {
@@ -622,8 +654,21 @@ void App::start_texture_tour() {
                     }
                 });
         }
+    // The menus' art, every language's (menu_dump, apply_texture_packs).
+    for (int i = 0; menu::kMenuLanguages[i]; ++i)
+        for (const std::string& path : menu::list_menu_files(*vfs_, menu::kMenuLanguages[i], ".pmb"))
+            tour_jobs_.push_back([this, path] {
+                try {
+                    const menu::MenuScene scene = menu::MenuScene::load(*vfs_, path);
+                    if (const menu::MenuRenderer::ImagePack& pack = menu::MenuRenderer::image_pack())
+                        for (const menu::MenuImage& img : scene.images())
+                            if (!img.rgba.empty()) pack(img);
+                } catch (const std::exception& e) {
+                    LOG_WARN("Texture tour: %s: %s", path.c_str(), e.what());
+                }
+            });
     tour_total_ = int(tour_jobs_.size());
-    LOG_INFO("Texture tour: %d courses and car paints to build", tour_total_);
+    LOG_INFO("Texture tour: %d courses, car paints and menus to build", tour_total_);
 }
 
 void App::texture_tour_step() {
@@ -646,7 +691,7 @@ void App::texture_tour_step() {
 std::string App::texture_tour_status() const {
     if (tour_total_ == 0) return "";
     if (!tour_jobs_.empty()) return "Dumping textures: " + std::to_string(tour_done_) + " of " + std::to_string(tour_total_);
-    return "Texture dump done: " + std::to_string(tour_total_) + " courses and car paints";
+    return "Texture dump done: " + std::to_string(tour_total_) + " courses, car paints and menus";
 }
 
 void App::dump_movies() {
@@ -1650,6 +1695,7 @@ bool App::show_song() const { return to_lower(config_.get("music", "show_song").
 
 void App::shutdown() {
     music_.cancel(); // a folder scan's thread reads files through SDL
+    menu::MenuRenderer::set_image_pack({}); // (it refers to this App)
     if (movie_dump_.joinable()) movie_dump_.join();
     remember_race_scale();
     if (input_) save_config();

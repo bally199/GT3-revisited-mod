@@ -1,5 +1,6 @@
 #include "menu/menu_renderer.h"
 
+#include "menu/menu_canvas.h"
 #include "menu/menu_text.h"
 #include "text/game_font.h"
 
@@ -88,30 +89,61 @@ MenuRenderer::~MenuRenderer() {
     clear_cache();
 }
 
+namespace {
+MenuRenderer::ImagePack& image_pack_slot() {
+    static MenuRenderer::ImagePack pack;
+    return pack;
+}
+} // namespace
+
+void MenuRenderer::set_image_pack(ImagePack pack) { image_pack_slot() = std::move(pack); }
+const MenuRenderer::ImagePack& MenuRenderer::image_pack() { return image_pack_slot(); }
+
 void MenuRenderer::release() {
     for (SDL_Texture* t : textures_)
-        if (t) SDL_DestroyTexture(t);
+        if (t) {
+            hd_.erase(t);
+            SDL_DestroyTexture(t);
+        }
     textures_.clear();
 }
 
 void MenuRenderer::clear_cache() {
     for (auto& [scene, list] : cache_)
         for (SDL_Texture* t : list)
-            if (t) SDL_DestroyTexture(t);
+            if (t) {
+                hd_.erase(t);
+                SDL_DestroyTexture(t);
+            }
     cache_.clear();
 }
 
 std::vector<SDL_Texture*> MenuRenderer::upload(const MenuScene* scene) {
     std::vector<SDL_Texture*> out;
+    const ImagePack& pack = image_pack();
     for (const MenuImage& img : scene->images()) {
         SDL_Texture* t = nullptr;
         if (!img.rgba.empty()) {
-            t = SDL_CreateTexture(r_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, int(img.width),
-                                  int(img.height));
+            const MenuImage* use = &img;
+            std::optional<MenuImage> hd;
+            if (pack) {
+                hd = pack(img);
+                if (hd && hd->width && hd->height && hd->rgba.size() >= size_t(hd->width) * hd->height) use = &*hd;
+                else hd.reset();
+            }
+            t = SDL_CreateTexture(r_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, int(use->width),
+                                  int(use->height));
+            if (!t && hd) { // (too large for the renderer: the original)
+                hd.reset();
+                use = &img;
+                t = SDL_CreateTexture(r_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, int(img.width),
+                                      int(img.height));
+            }
             if (t) {
-                SDL_UpdateTexture(t, nullptr, img.rgba.data(), int(img.width * 4));
+                SDL_UpdateTexture(t, nullptr, use->rgba.data(), int(use->width * 4));
                 SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
                 SDL_SetTextureScaleMode(t, SDL_SCALEMODE_LINEAR);
+                if (hd) hd_.insert(t);
             }
         }
         out.push_back(t);
@@ -140,25 +172,54 @@ void MenuRenderer::draw_elements(const std::vector<ElementDraw>& list, const Ren
     SDL_Rect clip{int(dst.x), int(dst.y), int(dst.w + 0.5f), int(dst.h + 0.5f)};
     SDL_SetRenderClipRect(r_, &clip);
     SDL_SetRenderDrawBlendMode(r_, SDL_BLENDMODE_BLEND);
+    // Sharp parts (set_canvas): runs of them go into the picture between the art, as models do.
+    const bool can_sharp = canvas_ && canvas_->on();
+    const SDL_FRect pic = can_sharp ? canvas_->picture_rect() : SDL_FRect{};
+    const SDL_Rect pic_clip{0, 0, int(pic.w), int(pic.h)};
+    bool in_sharp = false, art_since = true; // (art drawn into the page / layer since the last run)
     for (const ElementDraw& d : list) {
         if (d.alpha <= 0.0f) continue;
+        const bool s = can_sharp && sharp(d);
+        if (s && !in_sharp) {
+            canvas_->model_begin(r_, art_since);
+            in_sharp = true;
+        } else if (!s && in_sharp) {
+            canvas_->model_end(r_);
+            SDL_SetRenderClipRect(r_, &clip);
+            in_sharp = false;
+            art_since = false;
+        }
+        const SDL_FRect& to = s ? pic : dst;
+        const SDL_Rect& base = s ? pic_clip : clip;
         if (d.has_clip) {
-            const float sx = dst.w / kMenuWidth, sy = dst.h / kMenuHeight;
-            SDL_Rect c{int(dst.x + d.clip.x * sx), int(dst.y + (kMenuHeight - d.clip.y - d.clip.h) * sy),
+            const float sx = to.w / kMenuWidth, sy = to.h / kMenuHeight;
+            SDL_Rect c{int(to.x + d.clip.x * sx), int(to.y + (kMenuHeight - d.clip.y - d.clip.h) * sy),
                        int(d.clip.w * sx + 0.5f), int(d.clip.h * sy + 0.5f)};
             SDL_Rect both;
-            if (!SDL_GetRectIntersection(&c, &clip, &both)) continue;
+            if (!SDL_GetRectIntersection(&c, &base, &both)) continue;
             SDL_SetRenderClipRect(r_, &both);
         }
-        if (d.kind != ElementDraw::Kind::Element) draw_effect(d, dst);
+        if (!s) art_since = true;
+        if (d.kind != ElementDraw::Kind::Element) draw_effect(d, to, s);
         else if (d.element) {
             drawing_ = d.scene ? d.scene : scene_;
-            draw_element(*d.element, textures_for(d.scene), d, ro, dst);
+            draw_element(*d.element, textures_for(d.scene), d, ro, to);
             drawing_ = nullptr;
         }
-        if (d.has_clip) SDL_SetRenderClipRect(r_, &clip);
+        if (d.has_clip) SDL_SetRenderClipRect(r_, &base);
     }
+    if (in_sharp) canvas_->model_end(r_);
     SDL_SetRenderClipRect(r_, had_clip ? &old_clip : nullptr);
+}
+
+bool MenuRenderer::sharp(const ElementDraw& d) {
+    if (d.kind == ElementDraw::Kind::Arc) return true;
+    if (d.kind != ElementDraw::Kind::Element || !d.element || d.widget || d.overlay || d.hide_parts) return false;
+    const Element& e = *d.element;
+    if (e.widget_class && !e.widget_class->empty()) return false;
+    if (!e.image) return false;
+    const std::vector<SDL_Texture*>& textures = textures_for(d.scene);
+    return e.image->image < textures.size() && hd_.count(textures[e.image->image]) != 0;
 }
 
 void MenuRenderer::draw(int page, const SceneOptions& so, const RenderOptions& ro, const SDL_FRect& dst) {
@@ -279,7 +340,7 @@ void MenuRenderer::draw_element(const Element& e, const std::vector<SDL_Texture*
     }
 }
 
-void MenuRenderer::draw_effect(const ElementDraw& t, const SDL_FRect& dst) {
+void MenuRenderer::draw_effect(const ElementDraw& t, const SDL_FRect& dst, bool fine) {
     if (!t.has_box && !t.element) return;
     const float sx = dst.w / kMenuWidth, sy = dst.h / kMenuHeight;
     const float bx = t.has_box ? t.box.x : t.element->x, by = t.has_box ? t.box.y : t.element->y;
@@ -300,24 +361,54 @@ void MenuRenderer::draw_effect(const ElementDraw& t, const SDL_FRect& dst) {
         vx.tex_coord = {0, 0};
     };
     if (t.kind == ElementDraw::Kind::Arc) {
-        // 32 vertex pairs from angle level to level2 (outer, inner).
         const float pcx = (left + right) * 0.5f, pcy = (top + bottom) * 0.5f;
         const float rx = (right - left) * 0.5f, ry = (bottom - top) * 0.5f, k = 1.0f - t.arc_thickness;
         SDL_FColor col{t.fill.r, t.fill.g, t.fill.b, t.fill.a * t.alpha};
-        SDL_Vertex av[64];
-        int ai[31 * 6];
-        for (int i = 0; i < 32; ++i) {
-            float a = (t.level + (t.level2 - t.level) * float(i) / 31.0f) * 3.14159265f / 180.0f;
-            float ox = std::cos(a) * rx, oy = -std::sin(a) * ry;
-            set(av[2 * i], pcx + ox, pcy + oy, col);
-            set(av[2 * i + 1], pcx + ox * k, pcy + oy * k, col);
-        }
-        for (int i = 0; i < 31; ++i) {
-            int* q = ai + i * 6;
-            q[0] = 2 * i, q[1] = 2 * i + 1, q[2] = 2 * i + 2, q[3] = 2 * i + 1, q[4] = 2 * i + 3, q[5] = 2 * i + 2;
-        }
         SDL_SetRenderDrawBlendMode(r_, SDL_BLENDMODE_BLEND);
-        SDL_RenderGeometry(r_, nullptr, av, 64, ai, 31 * 6);
+        if (!fine) {
+            // 32 vertex pairs from angle level to level2 (outer, inner).
+            SDL_Vertex av[64];
+            int ai[31 * 6];
+            for (int i = 0; i < 32; ++i) {
+                float a = (t.level + (t.level2 - t.level) * float(i) / 31.0f) * 3.14159265f / 180.0f;
+                float ox = std::cos(a) * rx, oy = -std::sin(a) * ry;
+                set(av[2 * i], pcx + ox, pcy + oy, col);
+                set(av[2 * i + 1], pcx + ox * k, pcy + oy * k, col);
+            }
+            for (int i = 0; i < 31; ++i) {
+                int* q = ai + i * 6;
+                q[0] = 2 * i, q[1] = 2 * i + 1, q[2] = 2 * i + 2, q[3] = 2 * i + 1, q[4] = 2 * i + 3, q[5] = 2 * i + 2;
+            }
+            SDL_RenderGeometry(r_, nullptr, av, 64, ai, 31 * 6);
+            return;
+        }
+        // At the screen's resolution (set_canvas): segments of about 4 pixels, and a one-pixel
+        // fringe fading out past the outer and inner edges (the edges smooth, as the 640 x 448
+        // picture scaled up was). Rings: outer fringe, outer, inner, inner fringe.
+        const float sweep = std::abs(t.level2 - t.level) * 3.14159265f / 180.0f;
+        const int n = std::clamp(int(sweep * std::max(rx, ry) / 4.0f), 8, 512) + 1;
+        const float fx = rx > 1 ? 1.0f / rx : 0, fy = ry > 1 ? 1.0f / ry : 0; // a pixel, per radius
+        const float kin = std::max(0.0f, k);
+        SDL_FColor clear = col;
+        clear.a = 0;
+        std::vector<SDL_Vertex> av(size_t(n) * 4);
+        std::vector<int> ai;
+        ai.reserve(size_t(n - 1) * 18);
+        for (int i = 0; i < n; ++i) {
+            float a = (t.level + (t.level2 - t.level) * float(i) / float(n - 1)) * 3.14159265f / 180.0f;
+            float c = std::cos(a), sn = -std::sin(a);
+            SDL_Vertex* v4 = &av[size_t(i) * 4];
+            set(v4[0], pcx + c * rx * (1 + fx), pcy + sn * ry * (1 + fy), clear);
+            set(v4[1], pcx + c * rx, pcy + sn * ry, col);
+            set(v4[2], pcx + c * rx * kin, pcy + sn * ry * kin, col);
+            set(v4[3], pcx + c * rx * std::max(0.0f, kin - fx), pcy + sn * ry * std::max(0.0f, kin - fy), clear);
+        }
+        for (int i = 0; i + 1 < n; ++i)
+            for (int b = 0; b < 3; ++b) {
+                const int p0 = i * 4 + b, p1 = p0 + 1, q0 = p0 + 4, q1 = p1 + 4;
+                for (int x : {p0, p1, q0, p1, q1, q0}) ai.push_back(x);
+            }
+        SDL_RenderGeometry(r_, nullptr, av.data(), int(av.size()), ai.data(), int(ai.size()));
         return;
     }
     SDL_BlendMode mode = SDL_BLENDMODE_ADD;

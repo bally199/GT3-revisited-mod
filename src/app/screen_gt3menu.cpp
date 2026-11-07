@@ -324,6 +324,7 @@ private:
         // The language page shows before a language is chosen: in the region's own (British English).
         if (language_page_) lang_ = text::language_code(app.vfs()->region().default_language());
         renderer_ = std::make_unique<MenuRenderer>(app.renderer());
+        renderer_->set_canvas(&canvas_); // gauges and HD art at the screen's resolution
         // "mpeg" widgets show the background movie.
         // GT mode: 3D car renders on top of the widget's own art.
         renderer_->set_widget_overlay_drawer([this, &app](SDL_Renderer* r, const Element& e, const SDL_FRect& box,
