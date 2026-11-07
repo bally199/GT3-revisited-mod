@@ -203,7 +203,13 @@ void RaceScreen::render_loading(App& app, Ui& ui) {
         }
     }
     const u64 now = SDL_GetTicksNS();
-    const int frames = loading_drawn_ ? menu::flow::LoadingPicture::frames_for(now - loading_ns_) : 1;
+    // The first: up to where the effect has settled (at least one frame). The load blocks right
+    // after it, where the game would go on drawing the transition while it loads.
+    const int frames = loading_drawn_ ? menu::flow::LoadingPicture::frames_for(now - loading_ns_)
+                       : !loading_.valid()
+                           ? 1
+                           : std::max(1, menu::flow::ScreenTransition::settle_frames(loading_.transition.type()) + 1 -
+                                             loading_.transition.frames());
     if (!loading_drawn_)
         LOG_INFO("Race: loading picture (%s, transition at frame %d)", loading_.valid() ? "the menu's" : "none",
                  loading_.valid() ? loading_.transition.frames() : -1);

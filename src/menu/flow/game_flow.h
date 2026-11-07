@@ -122,6 +122,7 @@ public:
     // True while switching controls: the screen keeps the frozen frame and
     // draws the transition instead of the menu.
     bool switching() const { return switch_frames_ > 0; }
+    int switch_frames_left() const { return switch_frames_; }
     // Gameplay started by a request has returned: reopen the menu.
     void game_finished();
     bool waiting_for_game() const { return waiting_game_; }

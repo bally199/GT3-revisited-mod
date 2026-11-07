@@ -631,6 +631,12 @@ private:
             SDL_GetTextureSize(picture, &w, &h);
             SDL_SetRenderTarget(r, picture);
             for (; pending_draws_ > 0; --pending_draws_) transition_.draw_frame(r, SDL_FRect{0, 0, w, h});
+            // The last frame before the next control loads (which blocks, its HD art especially):
+            // the effect settled now, where the game would go on drawing it while that loads.
+            if (flow_->switching() && flow_->switch_frames_left() <= 1)
+                while (transition_.active() &&
+                       transition_.frames() <= menu::flow::ScreenTransition::settle_frames(transition_.type()))
+                    transition_.draw_frame(r, SDL_FRect{0, 0, w, h});
         } else {
             if (transition_.active())
                 LOG_INFO("gt3menu: transition over after %d frames, %.0f ms", transition_.frames(),

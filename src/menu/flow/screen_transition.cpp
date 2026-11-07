@@ -77,9 +77,14 @@ void ScreenTransition::draw_frame(SDL_Renderer* r, const SDL_FRect& dst) {
     }
     switch (type_) {
     case TransitionType::Fadeout:
-        // A near-black wash at alpha 0x0C (GS scale) every frame.
+        // A near-black wash at alpha 0x0C (GS scale) every frame. The GS blends in integers,
+        // (wash - picture) x 12 >> 7, which keeps stepping anything brighter than the wash down
+        // to it: once settled the picture is gone, the wash colour all over. A GPU's rounded
+        // blend stalls within about 5 levels of it instead, leaving a faint picture: after the
+        // settle frames, the wash opaque.
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColorFloat(r, 12 / 255.0f, 12 / 255.0f, 12 / 255.0f, gs_alpha(0x0C));
+        SDL_SetRenderDrawColorFloat(r, 12 / 255.0f, 12 / 255.0f, 12 / 255.0f,
+                                    frame_ >= settle_frames(TransitionType::Fadeout) ? 1.0f : gs_alpha(0x0C));
         rect(0, 0, 640, 448);
         break;
     case TransitionType::DelayFadeout:

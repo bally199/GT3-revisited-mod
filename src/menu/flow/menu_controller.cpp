@@ -129,6 +129,10 @@ void apply_text_effects(ElementDraw& d, const Element& e, u32 age) {
         // The text enters from the box's right edge (the reference tickers).
         d.text_dx = e.w - off;
         d.text_clip = true;
+        static std::set<std::string> logged; // (once per element: its box and style, for checking its placement)
+        if (logged.insert(e.name + "|" + t.font).second)
+            LOG_INFO("menu: marquee %s box (x %.1f y %.1f w %.1f h %.1f) align 0x%02x font %s", e.name.c_str(), e.x, e.y,
+                     e.w, e.h, unsigned(t.align), t.font.c_str());
     }
     if (t.align & 0x20) {
         // Count characters: game encoding uses two bytes for EUC-JP and
