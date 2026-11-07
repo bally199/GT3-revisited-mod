@@ -20,7 +20,7 @@
 #   pwsh -ExecutionPolicy Bypass -File $HOME\source\gt3r-xbox\hd-pack.ps1 -Fonts -Torch
 #       the fonts' glyph atlases: font_dump\*.png (build.ps1 -FetchDir font_dump) -> fonts-hd\, at 4x
 #       (-MenuScale), the alpha (the glyphs' shapes) through Real-ESRGAN too
-#   pwsh -ExecutionPolicy Bypass -File $HOME\source\gt3r-xbox\hd-pack.ps1 -Movies [-Only opening.pss]
+#   pwsh -ExecutionPolicy Bypass -File $HOME\source\gt3r-xbox\hd-pack.ps1 -Movies -Torch [-Only opening.pss]
 #       movie_dump\*.pss + movies.txt (build.ps1 -FetchDir movie_dump) -> movies-hd\<name>.pss.m2v
 #
 # Then onto the console: build.ps1 -PutDir textures-hd -To textures (and menu-hd the same), and
@@ -77,8 +77,9 @@ try {
     $torchPy = Join-Path $root "tools\torch-venv\Scripts\python.exe"
     $upscaler = Join-Path $root "tools\upscale.py"
     $torchModel = Join-Path $root "tools\RealESRGAN_x4plus.pth"
+    $movieModel = Join-Path $root "tools\realesr-animevideov3.pth"
     if ($Torch) {
-        foreach ($need in $torchPy, $upscaler, $torchModel) {
+        foreach ($need in @($torchPy, $upscaler, $torchModel) + @(if ($Movies) { $movieModel })) {
             if (-not (Test-Path $need)) { throw "$need is missing: run torch-setup.ps1 first" }
         }
     } elseif (-not $NoAI -and -not (Test-Path $esrgan)) { throw "Real-ESRGAN is not at $esrgan (see the top of this script)" }
@@ -326,8 +327,13 @@ return [int]$m
             $vf = if ($fields) { "il=l=i:c=i,setfield=tff,bwdif=mode=send_field:parity=tff:deint=all" } else { "null" }
             Run "ffmpeg (frames)" "ffmpeg" @("-v", "error", "-y", "-f", "mpeg", "-i", (Join-Path $in $name), "-map", "0:v:0", "-vf", $vf,
                                              "-fps_mode", "passthrough", "$movieWork\in\%06d.png")
-            & $esrgan -i "$movieWork\in" -o "$movieWork\up" -n realesr-animevideov3 -s 2 -t $Tile -f png 2>&1 | ForEach-Object { "$_" } |
-                Where-Object { $_ -notmatch '^\s*[\d.]+%$' } | Select-Object -Last 5 | ForEach-Object { Write-Host "   $_" }
+            if ($Torch) {
+                & $torchPy $upscaler $movieModel "$movieWork\in" "$movieWork\up" --out-scale 2 2>&1 | ForEach-Object { "$_" } |
+                    Select-Object -Last 3 | ForEach-Object { Write-Host "   $_" }
+            } else {
+                & $esrgan -i "$movieWork\in" -o "$movieWork\up" -n realesr-animevideov3 -s 2 -t $Tile -f png 2>&1 | ForEach-Object { "$_" } |
+                    Where-Object { $_ -notmatch '^\s*[\d.]+%$' } | Select-Object -Last 5 | ForEach-Object { Write-Host "   $_" }
+            }
             # Frames Real-ESRGAN did not make or made blank: ffmpeg's (lanczos) instead.
             $plain = 0
             foreach ($f in Get-ChildItem -File "$movieWork\in") {

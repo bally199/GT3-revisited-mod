@@ -1,11 +1,12 @@
 """GT3 Revisited HD packs: Real-ESRGAN through PyTorch on CUDA (no Vulkan).
 
-    python upscale.py <model.pth> <in folder> <out folder> [--alpha-model]
+    python upscale.py <model.pth> <in folder> <out folder> [--alpha-model] [--out-scale N]
 
 Every PNG in <in folder> comes out 4x (the model's scale) in <out folder>, same name, RGBA.
 The colour goes through the model; the alpha is scaled with lanczos (a model softens or invents
 steps in masks), or with --alpha-model goes through the model too, as a grey picture (the font
-atlases: their glyphs' shapes are in the alpha). Each image is padded by a few mirrored pixels first so its edges see
+atlases: their glyphs' shapes are in the alpha). --out-scale N: the result resized (lanczos) to N
+times the original when the model's scale is another (the movies' frames: 2x from a 4x model). Each image is padded by a few mirrored pixels first so its edges see
 neighbours, then cropped back. Images that fail are left out (hd-pack.ps1 checks every one
 against its original and falls back for those). Prints one line per 200 images.
 
@@ -25,8 +26,14 @@ PAD = 4
 
 
 def main() -> int:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    alpha_model = "--alpha-model" in sys.argv[1:]
+    argv = sys.argv[1:]
+    out_scale = 0
+    if "--out-scale" in argv:
+        k = argv.index("--out-scale")
+        out_scale = int(argv[k + 1])
+        del argv[k:k + 2]
+    args = [a for a in argv if not a.startswith("--")]
+    alpha_model = "--alpha-model" in argv
     if len(args) != 3:
         print(__doc__)
         return 2
@@ -74,8 +81,12 @@ def main() -> int:
                 else:
                     alpha = np.asarray(Image.fromarray(np.ascontiguousarray(rgba[..., 3])).resize(
                         (w * scale, h * scale), Image.LANCZOS))
-                result = np.dstack([up, alpha])
-                Image.fromarray(np.ascontiguousarray(result), "RGBA").save(dst / f.name)
+                result = Image.fromarray(np.ascontiguousarray(np.dstack([up, alpha])), "RGBA")
+                if out_scale and out_scale != scale:
+                    result = result.resize((w * out_scale, h * out_scale), Image.LANCZOS)
+                if im.mode in ("RGB", "L", "P") and not alpha_model and rgba[..., 3].min() == 255:
+                    result = result.convert("RGB")  # (opaque in, opaque out: the movies' frames)
+                result.save(dst / f.name)
                 done += 1
             except Exception as e:  # one bad image must not stop the rest
                 failed += 1

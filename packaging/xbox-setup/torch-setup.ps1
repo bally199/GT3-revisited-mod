@@ -50,6 +50,12 @@ if (-not (Test-Path $model)) {
     Write-Host "== The Real-ESRGAN x4plus model"
     Invoke-WebRequest "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth" -OutFile $model
 }
+# The movies' model (hd-pack.ps1 -Movies -Torch): small and fast, made for video.
+$movieModel = Join-Path $tools "realesr-animevideov3.pth"
+if (-not (Test-Path $movieModel)) {
+    Write-Host "== The Real-ESRGAN animevideov3 model (movies)"
+    Invoke-WebRequest "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-animevideov3.pth" -OutFile $movieModel
+}
 Write-Host "== Checking CUDA"
 & $py -c "import torch; print('PyTorch', torch.__version__, '| CUDA', torch.cuda.is_available(), '|', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no GPU'); assert torch.cuda.is_available(); torch.zeros(1, device='cuda')"
 if ($LASTEXITCODE) { throw "PyTorch cannot use the GPU (see above)" }
