@@ -163,6 +163,13 @@ private:
     const std::vector<SDL_Texture*>& textures_for(const MenuScene* scene);
     std::vector<SDL_Texture*> upload(const MenuScene* scene);
     void release();
+    // HD replacements arrive in the background: upload() makes the disc's textures, waits a
+    // little for the replacements (a page with few is whole at once), and the rest take their
+    // place as they are decoded (apply_hd, before each draw; those on screen first: want_hd).
+    void apply_hd(double budget_ms);
+    void want_hd(const MenuScene* scene, u32 image);
+    void forget_hd(const MenuScene* scene);
+    std::vector<SDL_Texture*>* textures_of(const MenuScene* scene);
 
     SDL_Renderer* r_;
     const MenuScene* scene_ = nullptr;
@@ -170,6 +177,10 @@ private:
     std::vector<SDL_Texture*> textures_;
     std::map<const MenuScene*, std::vector<SDL_Texture*>> cache_;
     std::set<SDL_Texture*> hd_; // made from an image_pack() replacement
+    struct HdLoader;
+    std::shared_ptr<HdLoader> hd_loader_;
+    std::map<const MenuScene*, u64> hd_batch_;              // the scene's current upload
+    std::set<std::pair<const MenuScene*, u32>> hd_pending_; // images whose replacement may come
     MenuCanvas* canvas_ = nullptr;
     TextDrawer text_ = draw_text_debug_font;
     TextHd text_hd_;

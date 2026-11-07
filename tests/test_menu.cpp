@@ -121,6 +121,75 @@ TEST(menu_render_synthetic) {
     }
 }
 
+// HD replacements (image_pack): at once when they come quickly, in place of the disc's art
+// once decoded when they take longer.
+TEST(menu_render_hd_replacements) {
+    Bytes b = synthetic_pmb();
+    MenuScene s = MenuScene::load(b, "synthetic");
+    // The box gets an image (opaque red, 4 x 4) in place of its colours.
+    {
+        Element& e = s.mutable_file().pages[0].layers[0].elements[0];
+        const u32 id = s.add_image(MenuImage{4, 4, std::vector<u32>(16, 0xFF0000FFu)});
+        e.type = u16((e.type & ~Element::kColor & ~Element::kText) | Element::kImage);
+        e.colors.reset();
+        e.text.reset();
+        e.image = ImageRef{id, {0, 1, 1, 1, 1, 0, 0, 0}};
+    }
+    SceneOptions so;
+    RenderOptions ro;
+    ro.text = false;
+    static int delay_ms = 0;
+    MenuRenderer::set_image_pack([](const MenuImage& img) -> std::optional<MenuImage> {
+        SDL_Delay(Uint32(delay_ms));
+        MenuImage hd{img.width * 2, img.height * 2, {}};
+        hd.rgba.assign(size_t(hd.width) * hd.height, 0xFF00FF00u); // opaque green (RGBA32 bytes: 00 FF 00 FF)
+        return hd;
+    });
+    auto green_at = [](const std::vector<u32>& px, int x, int y) {
+        const u8* c = reinterpret_cast<const u8*>(&px[size_t(y) * 64 + x]);
+        return c[1] > 240 && c[0] < 16;
+    };
+    std::vector<u32> px = render_page_rgba(s, 0, so, ro, 64, 44);
+    CHECK(px.size() == 64 * 44 && green_at(px, 10, 40));
+
+    delay_ms = 400;
+    SDL_Surface* surf = SDL_CreateSurface(64, 44, SDL_PIXELFORMAT_RGBA32);
+    SDL_Renderer* r = surf ? SDL_CreateSoftwareRenderer(surf) : nullptr;
+    CHECK(r != nullptr);
+    if (r) {
+        auto frame = [&] {
+            SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+            SDL_RenderClear(r);
+            return true;
+        };
+        auto pixels = [&] {
+            SDL_FlushRenderer(r);
+            std::vector<u32> out(64 * 44);
+            for (int y = 0; y < 44; ++y)
+                std::memcpy(&out[size_t(y) * 64], static_cast<const u8*>(surf->pixels) + size_t(y) * surf->pitch, 64 * 4);
+            return out;
+        };
+        {
+            MenuRenderer mr(r);
+            mr.set_scene(&s);
+            frame();
+            mr.draw(0, so, ro, SDL_FRect{0, 0, 64, 44});
+            std::vector<u32> first = pixels();
+            CHECK(!green_at(first, 10, 40)); // the disc's red, the replacement still decoding
+            SDL_Delay(700);
+            frame();
+            mr.draw(0, so, ro, SDL_FRect{0, 0, 64, 44});
+            CHECK(green_at(pixels(), 10, 40));
+            // A scene dropped with its replacements still coming: nothing left behind.
+            mr.set_scene(&s);
+            mr.set_scene(nullptr);
+        }
+        SDL_DestroyRenderer(r);
+    }
+    if (surf) SDL_DestroySurface(surf);
+    MenuRenderer::set_image_pack({});
+}
+
 TEST(menu_disc_files) {
     Disc* disc = test::test_disc();
     if (!disc) SKIP("needs GT3R_DISC");
