@@ -214,9 +214,10 @@ void MenuRenderer::draw_elements(const std::vector<ElementDraw>& list, const Ren
 
 bool MenuRenderer::sharp(const ElementDraw& d) {
     if (d.kind == ElementDraw::Kind::Arc) return true;
-    if (d.kind != ElementDraw::Kind::Element || !d.element || d.widget || d.overlay || d.hide_parts) return false;
+    if (d.kind != ElementDraw::Kind::Element || !d.element || d.overlay || d.hide_parts) return false;
     const Element& e = *d.element;
-    if (e.widget_class && !e.widget_class->empty()) return false;
+    // (Not those whose widget callbacks run: they can draw models of their own into the canvas.)
+    if (d.widget && e.widget_class && !e.widget_class->empty()) return false;
     if (!e.image) return false;
     const std::vector<SDL_Texture*>& textures = textures_for(d.scene);
     return e.image->image < textures.size() && hd_.count(textures[e.image->image]) != 0;
