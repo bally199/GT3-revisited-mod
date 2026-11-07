@@ -33,6 +33,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <mutex>
 #include <set>
 
 #if GT3R_UWP && GT3R_GLES
@@ -593,13 +594,22 @@ void App::apply_texture_packs() {
     // same packs (textures\menu, say).
     const std::string menu_dump = dump ? data_dir_ + "menu_dump/" : std::string();
     if (dump) host_make_dir(menu_dump);
-    auto dumped = std::make_shared<std::set<std::string>>();
+    struct Dumped {
+        std::mutex mutex;
+        std::set<std::string> names;
+    };
+    auto dumped = std::make_shared<Dumped>();
     menu::MenuRenderer::set_image_pack([this, menu_dump, packs, dumped](const menu::MenuImage& img)
                                            -> std::optional<menu::MenuImage> {
         if (!gpu_ || img.rgba.size() < size_t(img.width) * img.height) return std::nullopt;
         const std::string name = render::GpuContext::texture_pack_name(
             img.width, img.height, render::GpuContext::texture_pack_hash(img.rgba.data(), size_t(img.width) * img.height));
-        if (!menu_dump.empty() && dumped->insert(name).second) {
+        bool first = false;
+        if (!menu_dump.empty()) {
+            std::lock_guard lock(dumped->mutex);
+            first = dumped->names.insert(name).second;
+        }
+        if (first) {
             const std::string path = menu_dump + name + ".png";
             if (!host_path_exists(path)) write_host_file(path, encode_png(img.width, img.height, img.rgba));
         }

@@ -130,7 +130,8 @@ public:
 
     // HD replacements for the menus' images (texture packs, docs/MODDING.md), for every
     // MenuRenderer: called with each image as it is uploaded; a larger image returned is used in
-    // its place (the elements' texture coordinates are fractions: any size fits).
+    // its place (the elements' texture coordinates are fractions: any size fits). Called from
+    // several threads at once.
     using ImagePack = std::function<std::optional<MenuImage>(const MenuImage&)>;
     static void set_image_pack(ImagePack pack);
     static const ImagePack& image_pack();

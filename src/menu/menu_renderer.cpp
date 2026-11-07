@@ -2,6 +2,10 @@
 
 #include "menu/menu_canvas.h"
 #include "menu/menu_text.h"
+
+#include <algorithm>
+#include <atomic>
+#include <thread>
 #include "text/game_font.h"
 
 #include <algorithm>
@@ -120,17 +124,36 @@ void MenuRenderer::clear_cache() {
 
 std::vector<SDL_Texture*> MenuRenderer::upload(const MenuScene* scene) {
     std::vector<SDL_Texture*> out;
+    // The replacements first, several at a time (each is a PNG to read and decode: a page's
+    // worth one after another held the menus up for seconds).
     const ImagePack& pack = image_pack();
-    for (const MenuImage& img : scene->images()) {
+    const std::vector<MenuImage>& images = scene->images();
+    std::vector<std::optional<MenuImage>> found(images.size());
+    if (pack && !images.empty()) {
+        std::atomic<size_t> next{0};
+        auto work = [&] {
+            for (size_t i; (i = next++) < images.size();) {
+                if (images[i].rgba.empty()) continue;
+                try {
+                    found[i] = pack(images[i]);
+                } catch (...) {
+                }
+            }
+        };
+        const unsigned n = std::clamp(std::thread::hardware_concurrency(), 1u, 8u);
+        std::vector<std::thread> helpers;
+        for (unsigned k = 1; k < n && k < images.size(); ++k) helpers.emplace_back(work);
+        work();
+        for (std::thread& h : helpers) h.join();
+    }
+    for (size_t index = 0; index < images.size(); ++index) {
+        const MenuImage& img = images[index];
         SDL_Texture* t = nullptr;
         if (!img.rgba.empty()) {
             const MenuImage* use = &img;
-            std::optional<MenuImage> hd;
-            if (pack) {
-                hd = pack(img);
-                if (hd && hd->width && hd->height && hd->rgba.size() >= size_t(hd->width) * hd->height) use = &*hd;
-                else hd.reset();
-            }
+            std::optional<MenuImage>& hd = found[index];
+            if (hd && hd->width && hd->height && hd->rgba.size() >= size_t(hd->width) * hd->height) use = &*hd;
+            else hd.reset();
             t = SDL_CreateTexture(r_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, int(use->width),
                                   int(use->height));
             if (!t && hd) { // (too large for the renderer: the original)
