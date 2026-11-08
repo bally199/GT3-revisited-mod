@@ -19,7 +19,9 @@ What you need
 
 How
 ---
-1. Unzip this folder somewhere with space (e.g. Documents\GT3R-Xbox-Setup).
+1. Before unzipping: right-click the downloaded zip > Properties > tick Unblock > OK (else
+   Windows may stop Setup.bat with "Windows protected your PC": More info > Run anyway).
+   Then unzip it somewhere with space (e.g. Documents\GT3R-Xbox-Setup).
 2. Plug the USB drive into the PC.
 3. Drag your disc image onto Setup.bat (or double-click Setup.bat and pick it).
 4. Answer its questions. It:
