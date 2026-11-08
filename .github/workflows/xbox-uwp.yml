@@ -65,6 +65,14 @@ jobs:
             ./packaging/uwp/make-cert.ps1 -Out "$env:RUNNER_TEMP\gt3r-dev.pfx" -Password gt3r
             "CERT_PASSWORD=gt3r" | Out-File -Append $env:GITHUB_ENV
           }
+      # The fourth version part: 2000 + half hours since 2026-11-01 (UTC), as local builds number
+      # theirs (above the last): each build installs over an older one.
+      - name: Build number
+        shell: pwsh
+        run: |
+          $n = 2000 + [int][math]::Floor(((Get-Date).ToUniversalTime() - [datetime]::new(2026, 11, 1)).TotalMinutes / 30)
+          "GT3R_UWP_BUILD=$n" | Out-File -Append $env:GITHUB_ENV
+          "Package version x.y.z.$n"
       # Each -D argument in quotes: PowerShell splits an unquoted -DNAME=10.0 at the dot.
       - name: Configure
         shell: pwsh
@@ -73,7 +81,7 @@ jobs:
           "-DCMAKE_SYSTEM_NAME=WindowsStore" "-DCMAKE_SYSTEM_VERSION=10.0"
           "-DGT3R_ANGLE_DIR=$PWD/angle-uwp"
           "-DGT3R_UWP_CERT=$env:RUNNER_TEMP\gt3r-dev.pfx" "-DGT3R_UWP_CERT_PASSWORD=$env:CERT_PASSWORD"
-          "-DGT3R_UWP_BUILD=${{ github.run_number }}"
+          "-DGT3R_UWP_BUILD=$env:GT3R_UWP_BUILD"
       - name: Build and package
         run: cmake --build build-uwp --config Release --target gt3r -- /m
       - uses: actions/upload-artifact@v4

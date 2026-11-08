@@ -36,3 +36,11 @@ Run Setup.bat again later to update to a newer release; steps already done are s
 If something stops it, the message says why; setup.log has the details.
 
 Your HD textures are made from your own disc: keep them to yourself.
+
+Testing and reporting problems
+------------------------------
+This is a test release. If something goes wrong, the game writes a log, gt3r.log: in Device
+Portal (https://<console IP>:11443 in a browser) > File explorer > LocalAppData >
+GT3Revisited.Xbox_... > LocalState > GT3Revisited > GT3Revisited. Please report problems,
+with that log and setup.log from this folder, at:
+    https://github.com/bally199/GT3-revisited-mod/issues
