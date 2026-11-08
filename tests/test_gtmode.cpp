@@ -1764,3 +1764,19 @@ TEST(gtmode_disc_attract_time_limit) {
         CHECK(ev && ev->laps == 20);
     }
 }
+
+// A save's folder two levels down (saves/eu/ in a new data folder) is made, parents and all.
+TEST(gtmode_save_makes_its_folders) {
+    const std::string root = (std::filesystem::temp_directory_path() / "gt3r_test_save_dirs").string();
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    const std::string dir = root + "/saves/eu/";
+    CHECK(host_make_dir(dir));
+    CHECK(host_is_directory(root + "/saves/eu"));
+    CHECK(host_make_dir(dir)); // (there already)
+    const std::string path = root + "/saves/jp/gtmode.sav";
+    std::string err;
+    CHECK(game::write_save(path, game::GameState{}, &err));
+    CHECK(host_path_exists(path));
+    std::filesystem::remove_all(root);
+}

@@ -147,7 +147,22 @@ bool host_make_dir(const std::string& dir) {
 #if defined(SDL_PLATFORM_ANDROID)
     if (in_tree(dir)) return !platform::document_create(dir, true).empty();
 #endif
-    return SDL_CreateDirectory(dir.c_str());
+    if (SDL_CreateDirectory(dir.c_str())) return true;
+    // Missing parents: made here from the deepest folder there is. SDL makes them from the
+    // drive's root, and a UWP app cannot look at the folders above its own (Q:\Users\...),
+    // so on the Xbox saves/eu/ was never made and every GT mode save failed.
+    std::string d = dir;
+    while (d.size() > 1 && (d.back() == '/' || d.back() == '\\')) d.pop_back();
+    std::vector<std::string> missing;
+    while (!d.empty() && !host_is_directory(d)) {
+        missing.push_back(d);
+        const size_t sep = d.find_last_of("/\\");
+        if (sep == std::string::npos || sep == 0) break;
+        d.resize(sep);
+    }
+    for (auto it = missing.rbegin(); it != missing.rend(); ++it)
+        if (!SDL_CreateDirectory(it->c_str())) return false;
+    return host_is_directory(dir);
 }
 
 bool host_remove(const std::string& path) {

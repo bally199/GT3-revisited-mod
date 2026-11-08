@@ -337,6 +337,9 @@ void MenuRenderer::apply_hd(double budget_ms) {
 }
 
 void MenuRenderer::set_scene(const MenuScene* scene) {
+    // (The race's pause menu and replay options set theirs before each draw: the same scene
+    // keeps its textures, unless it gained images.)
+    if (scene && scene == scene_ && textures_.size() == scene->images().size()) return;
     release();
     scene_ = scene;
     if (scene) textures_ = upload(scene);

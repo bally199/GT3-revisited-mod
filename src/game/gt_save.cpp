@@ -637,6 +637,9 @@ bool write_save(const std::string& path, const GameState& s, std::string* error)
     }
     std::string text = save_to_text(s);
     std::string tmp = path + ".tmp";
+    // (Its folder first: a library whose folder could not be made earlier gets it now.)
+    if (const size_t sep = path.find_last_of("/\\"); sep != std::string::npos && sep > 0)
+        if (const std::string dir = path.substr(0, sep); !host_is_directory(dir)) host_make_dir(dir);
     if (!write_host_file(tmp, ByteSpan(reinterpret_cast<const u8*>(text.data()), text.size()))) {
         if (error) *error = "cannot write " + tmp;
         return false;
