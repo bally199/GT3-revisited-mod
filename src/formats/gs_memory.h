@@ -49,6 +49,9 @@ class GsMemory {
 public:
     static constexpr u32 kBytes = 4 * 1024 * 1024;
     GsMemory();
+    // Zeroed again, for another picture (only what uploads wrote is cleared: making a new one
+    // zeroes all 4 MB, which for a menu file's hundreds of pictures was most of its load time).
+    void reset();
 
     // Equivalent of a host->local GIF IMAGE transfer of a w*h rect at (0,0)
     // with BITBLTBUF(dbp, dbw, dpsm). `src` is packed at the format's bpp.
@@ -63,6 +66,7 @@ public:
 private:
     u32 clut_color(const Tex0& tex0, u32 index) const;
     std::vector<u8> mem_;
+    u32 dirty_lo_ = kBytes, dirty_hi_ = 0; // the bytes uploads have written: [lo, hi)
 };
 
 } // namespace gt3r

@@ -4,6 +4,8 @@
 #include "vfs/vfs.h"
 
 #include <algorithm>
+#include <atomic>
+#include <thread>
 
 namespace gt3r::menu {
 
@@ -14,20 +16,41 @@ MenuScene MenuScene::load(ByteSpan data, std::string path) {
     s.path_ = std::move(path);
     s.file_ = PmbFile::parse(data);
     s.images_.resize(s.file_.images.size());
-    for (size_t i = 0; i < s.file_.images.size(); ++i) {
-        try {
-            Bytes tex = s.file_.image_data(data, i);
-            Tex1 set = Tex1::parse(tex);
-            if (set.textures.empty()) throw FormatError("empty Tex1 set");
-            GsMemory gs;
-            set.upload(tex, gs);
-            Tex1::Image img = set.decode(gs, 0);
-            s.images_[i] = {img.width, img.height, std::move(img.rgba)};
-        } catch (const std::exception& e) {
-            ++s.image_failures_;
-            LOG_WARN("%s: image %zu: %s", s.path_.c_str(), i, e.what());
+    // The pictures decoded on several threads (the arcade menus' file has 756, the dealers' 131
+    // larger ones: one after the other, each in a new 4 MB GS memory, they took 0.3 to 0.5 s on
+    // an Xbox), each thread with one GS memory it clears between pictures.
+    const size_t count = s.file_.images.size();
+    std::vector<std::string> errors(count);
+    std::atomic<size_t> next{0};
+    auto work = [&] {
+        GsMemory gs;
+        for (size_t i; (i = next.fetch_add(1)) < count;) {
+            try {
+                Bytes tex = s.file_.image_data(data, i);
+                Tex1 set = Tex1::parse(tex);
+                if (set.textures.empty()) throw FormatError("empty Tex1 set");
+                gs.reset();
+                set.upload(tex, gs);
+                Tex1::Image img = set.decode(gs, 0);
+                s.images_[i] = {img.width, img.height, std::move(img.rgba)};
+            } catch (const std::exception& e) {
+                errors[i] = e.what()[0] ? e.what() : "failed";
+            }
         }
+    };
+    const unsigned helpers = count < 8 ? 0 : std::min<unsigned>(std::clamp(std::thread::hardware_concurrency(), 1u, 8u) - 1, unsigned(count / 4));
+    std::vector<std::thread> threads;
+    try {
+        for (unsigned k = 0; k < helpers; ++k) threads.emplace_back(work);
+    } catch (const std::exception&) { // (no more threads: this one does the rest)
     }
+    work();
+    for (std::thread& t : threads) t.join();
+    for (size_t i = 0; i < count; ++i)
+        if (!errors[i].empty()) {
+            ++s.image_failures_;
+            LOG_WARN("%s: image %zu: %s", s.path_.c_str(), i, errors[i].c_str());
+        }
     return s;
 }
 

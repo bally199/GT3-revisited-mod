@@ -53,6 +53,22 @@ TEST(gs_cross_format) {
     CHECK(gs.read_texel(0, 2, 0x14, 4, 2) == 0x1); // high nibble of byte 0 (row-pair swap)
 }
 
+// reset(): a memory used for one picture reads as a new one (every format's upload cleared).
+TEST(gs_reset_clears_uploads) {
+    GsMemory gs;
+    for (u32 psm : {0x00u, 0x01u, 0x02u, 0x13u, 0x14u}) {
+        const u32 w = 200, h = 130, bw = 4, bp = 96;
+        Bytes src(size_t(w) * h * psm_bits(psm) / 8, 0xFF);
+        gs.upload(bp, bw, psm, w, h, src);
+        gs.reset();
+        bool clear = true;
+        for (u32 y = 0; y < 256 && clear; ++y)
+            for (u32 x = 0; x < 256 && clear; ++x) clear = gs.read_texel(bp, bw, 0x00, x, y) == 0;
+        CHECK(clear);
+        CHECK(gs.read_texel(0, 16, 0x00, 1023, 1023) == 0);
+    }
+}
+
 TEST(gs_ct16_expand) {
     // A 16-bit texel's 5-bit channels become c << 3 with the low bits 0, as the GS reads them
     // (a 16-bit CLUT the same way): 31 -> 248, not 255.

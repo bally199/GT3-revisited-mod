@@ -141,6 +141,9 @@ public:
     // several threads at once.
     using ImagePack = std::function<std::optional<MenuImage>(const MenuImage&)>;
     static void set_image_pack(ImagePack pack);
+    // A head start for a scene about to be shown (its file just loaded): its largest pictures'
+    // replacements are decoded in the background into the pack's cache.
+    static void warm(const MenuScene& scene);
     static const ImagePack& image_pack();
 
     // Draws `page` so that the 640x448 menu space maps onto `dst`.
@@ -154,33 +157,39 @@ public:
 
 private:
     void draw_element(const Element& e, bool widget, const RenderOptions& ro, const SDL_FRect& dst);
-    void draw_element(const Element& e, const std::vector<SDL_Texture*>& textures, const ElementDraw& t,
+    void draw_element(const Element& e, std::vector<SDL_Texture*>& textures, const ElementDraw& t,
                       const RenderOptions& ro, const SDL_FRect& dst);
     void draw_effect(const ElementDraw& t, const SDL_FRect& dst, bool fine = false);
     // Whether `d` goes into the canvas's picture (set_canvas): Either = where the one before went.
     enum class Sharp : u8 { No, Yes, Either };
     Sharp sharp(const ElementDraw& d, const RenderOptions& ro);
-    const std::vector<SDL_Texture*>& textures_for(const MenuScene* scene);
+    std::vector<SDL_Texture*>& textures_for(const MenuScene* scene);
     std::vector<SDL_Texture*> upload(const MenuScene* scene);
     void release();
-    // HD replacements arrive in the background: upload() makes the disc's textures, waits a
-    // little for the replacements (a page with few is whole at once), and the rest take their
-    // place as they are decoded (apply_hd, before each draw; those on screen first: want_hd).
+    // A scene's textures are made as its pictures are first drawn (texture_at), from their HD
+    // replacements when the packs have them: asked of the loader's threads just before a list
+    // is drawn (request_art), put in place as they come (apply_hd), the disc's picture meanwhile.
+    void request_art(const std::vector<ElementDraw>& list, const RenderOptions& ro);
+    SDL_Texture* texture_at(const MenuScene* scene, std::vector<SDL_Texture*>& list, u32 image);
     void apply_hd(double budget_ms);
-    void want_hd(const MenuScene* scene, u32 image);
-    void forget_hd(const MenuScene* scene);
+    void forget_art(const MenuScene* scene);
     std::vector<SDL_Texture*>* textures_of(const MenuScene* scene);
 
     SDL_Renderer* r_;
     const MenuScene* scene_ = nullptr;
     const MenuScene* drawing_ = nullptr; // drawing_scene()
-    std::vector<SDL_Texture*> textures_;
+    std::vector<SDL_Texture*> textures_; // (null: not drawn yet, or no picture)
     std::map<const MenuScene*, std::vector<SDL_Texture*>> cache_;
     std::set<SDL_Texture*> hd_; // made from an image_pack() replacement
     struct HdLoader;
-    std::shared_ptr<HdLoader> hd_loader_;
-    std::map<const MenuScene*, u64> hd_batch_;              // the scene's current upload
-    std::set<std::pair<const MenuScene*, u32>> hd_pending_; // images whose replacement may come
+    enum : u8 { kArtNew = 0, kArtAsked = 1, kArtDone = 2 };
+    struct SceneArt {
+        u64 batch = 0;         // the loader's name for this scene's textures
+        std::vector<u8> state; // per image: its replacement not asked for / asked for / settled
+        bool opened = false;   // drawn once
+    };
+    std::map<const MenuScene*, SceneArt> art_; // (only with an image pack)
+    std::set<std::pair<const MenuScene*, u32>> art_failed_; // textures that could not be made
     MenuCanvas* canvas_ = nullptr;
     TextDrawer text_ = draw_text_debug_font;
     TextHd text_hd_;

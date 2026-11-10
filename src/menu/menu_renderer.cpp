@@ -109,52 +109,51 @@ std::shared_ptr<const MenuRenderer::ImagePack> image_pack_ref() {
 }
 } // namespace
 
-void MenuRenderer::set_image_pack(ImagePack pack) {
-    auto next = std::make_shared<const ImagePack>(std::move(pack));
-    std::lock_guard lock(image_pack_slot().mutex);
-    image_pack_slot().pack = std::move(next);
-}
 const MenuRenderer::ImagePack& MenuRenderer::image_pack() {
     // (The render thread's: it is the one that replaces the hook.)
     std::lock_guard lock(image_pack_slot().mutex);
     return *image_pack_slot().pack;
 }
 
-// Decodes replacements on worker threads: the jobs an upload queues (images seen on screen
-// first), the results picked up by apply_hd() on the render thread.
+// Decodes replacements on worker threads, one pool for every renderer: the jobs for images about
+// to be drawn first (request_art), their results picked up by apply_hd() on the render thread;
+// then the head starts (warm), whose results stay in the pack's own cache of decoded pictures.
 struct MenuRenderer::HdLoader {
     struct Job {
-        const MenuScene* scene;
-        u64 batch;
+        u64 batch; // 0: a head start (no result wanted)
         u32 image;
         MenuImage original; // (a copy: the scene may go before the job runs)
-        bool wanted = false;
     };
     struct Done {
-        const MenuScene* scene;
         u64 batch;
         u32 image;
         std::optional<MenuImage> hd;
     };
     std::mutex mutex;
     std::condition_variable wake, finished;
-    std::deque<Job> jobs;
+    std::deque<Job> jobs, warm_jobs;
     std::deque<Done> done;
+    std::map<u64, int> outstanding; // per live batch: jobs queued or running
     std::vector<std::thread> threads;
-    int busy = 0;
     bool stop = false;
+    int running = 0; // calls into the pack hook under way
     u64 next_batch = 1;
 
+    static HdLoader& get() {
+        static HdLoader loader;
+        return loader;
+    }
     ~HdLoader() {
         {
             std::lock_guard lock(mutex);
             stop = true;
             jobs.clear();
+            warm_jobs.clear();
         }
         wake.notify_all();
         for (std::thread& t : threads) t.join();
     }
-    void start() {
+    void start() { // (mutex held)
         if (!threads.empty()) return;
         const unsigned n = std::clamp(std::thread::hardware_concurrency(), 2u, 8u) - 1;
         for (unsigned k = 0; k < n; ++k) threads.emplace_back([this] { run(); });
@@ -162,13 +161,12 @@ struct MenuRenderer::HdLoader {
     void run() {
         std::unique_lock lock(mutex);
         for (;;) {
-            wake.wait(lock, [&] { return stop || !jobs.empty(); });
+            wake.wait(lock, [&] { return stop || !jobs.empty() || !warm_jobs.empty(); });
             if (stop) return;
-            auto it = std::find_if(jobs.begin(), jobs.end(), [](const Job& j) { return j.wanted; });
-            if (it == jobs.end()) it = jobs.begin();
-            Job job = std::move(*it);
-            jobs.erase(it);
-            ++busy;
+            std::deque<Job>& from = jobs.empty() ? warm_jobs : jobs;
+            Job job = std::move(from.front());
+            from.pop_front();
+            ++running;
             lock.unlock();
             std::optional<MenuImage> hd;
             try {
@@ -176,40 +174,68 @@ struct MenuRenderer::HdLoader {
             } catch (...) {
             }
             lock.lock();
-            --busy;
-            done.push_back({job.scene, job.batch, job.image, std::move(hd)});
+            --running;
+            finished.notify_all();
+            if (!job.batch) continue;
+            auto live = outstanding.find(job.batch);
+            if (live == outstanding.end()) continue; // (its scene's textures are gone)
+            --live->second;
+            done.push_back({job.batch, job.image, std::move(hd)});
             finished.notify_all();
         }
     }
+    // The head starts dropped and the calls into the pack hook over (the hook is being replaced:
+    // what the old one refers to may be going).
+    void quiesce() {
+        std::unique_lock lock(mutex);
+        warm_jobs.clear();
+        finished.wait(lock, [&] { return running == 0; });
+    }
+    // A batch's jobs and results dropped (its scene's textures go).
+    void forget(u64 batch) {
+        std::lock_guard lock(mutex);
+        outstanding.erase(batch);
+        jobs.erase(std::remove_if(jobs.begin(), jobs.end(), [&](const Job& j) { return j.batch == batch; }), jobs.end());
+        done.erase(std::remove_if(done.begin(), done.end(), [&](const Done& d) { return d.batch == batch; }), done.end());
+    }
 };
 
+void MenuRenderer::set_image_pack(ImagePack pack) {
+    auto next = std::make_shared<const ImagePack>(std::move(pack));
+    {
+        std::lock_guard lock(image_pack_slot().mutex);
+        image_pack_slot().pack = std::move(next);
+    }
+    HdLoader::get().quiesce();
+}
+void MenuRenderer::warm(const MenuScene& scene) {
+    if (!image_pack()) return;
+    // The largest first (a full-screen picture's replacement is the slowest to decode: ~150 ms
+    // at 4x on an Xbox), up to about 160 MB of replacements at 4x.
+    const std::vector<MenuImage>& images = scene.images();
+    std::vector<u32> order;
+    for (u32 i = 0; i < images.size(); ++i)
+        if (!images[i].rgba.empty()) order.push_back(i);
+    std::stable_sort(order.begin(), order.end(),
+                     [&](u32 a, u32 b) { return images[a].rgba.size() > images[b].rgba.size(); });
+    HdLoader& L = HdLoader::get();
+    size_t pixels = 0;
+    {
+        std::lock_guard lock(L.mutex);
+        for (u32 i : order) {
+            if (pixels + images[i].rgba.size() > 2'500'000 && pixels) break;
+            pixels += images[i].rgba.size();
+            L.warm_jobs.push_back({0, i, images[i]});
+        }
+        while (L.warm_jobs.size() > 128) L.warm_jobs.pop_front(); // (pages loaded and never shown)
+        L.start();
+    }
+    L.wake.notify_all();
+}
+
 MenuRenderer::~MenuRenderer() {
-    hd_loader_.reset(); // (its threads stopped before the textures go)
     release();
     clear_cache();
-}
-
-
-void MenuRenderer::release() {
-    forget_hd(scene_);
-    for (SDL_Texture* t : textures_)
-        if (t) {
-            hd_.erase(t);
-            SDL_DestroyTexture(t);
-        }
-    textures_.clear();
-}
-
-void MenuRenderer::clear_cache() {
-    for (auto& [scene, list] : cache_) {
-        forget_hd(scene);
-        for (SDL_Texture* t : list)
-            if (t) {
-                hd_.erase(t);
-                SDL_DestroyTexture(t);
-            }
-    }
-    cache_.clear();
 }
 
 static SDL_Texture* make_menu_texture(SDL_Renderer* r, const MenuImage& img) {
@@ -221,62 +247,47 @@ static SDL_Texture* make_menu_texture(SDL_Renderer* r, const MenuImage& img) {
     return t;
 }
 
-std::vector<SDL_Texture*> MenuRenderer::upload(const MenuScene* scene) {
-    std::vector<SDL_Texture*> out;
-    const std::vector<MenuImage>& images = scene->images();
-    for (const MenuImage& img : images) out.push_back(img.rgba.empty() ? nullptr : make_menu_texture(r_, img));
-    if (!image_pack() || images.empty()) return out;
-    // The replacements on the loader's threads (a PNG each to read and decode: a page's worth one
-    // after another held the menus up for seconds; the dealers' page has 131 images, 900 MB at 4x).
-    if (!hd_loader_) hd_loader_ = std::make_shared<HdLoader>();
-    HdLoader& L = *hd_loader_;
-    forget_hd(scene);
-    u64 batch;
-    {
-        std::lock_guard lock(L.mutex);
-        batch = L.next_batch++;
-        for (size_t i = 0; i < images.size(); ++i)
-            if (!images[i].rgba.empty() && out[i]) {
-                L.jobs.push_back({scene, batch, u32(i), images[i]});
-                hd_pending_.insert({scene, u32(i)});
+void MenuRenderer::release() {
+    forget_art(scene_);
+    for (SDL_Texture* t : textures_)
+        if (t) {
+            hd_.erase(t);
+            SDL_DestroyTexture(t);
+        }
+    textures_.clear();
+    scene_ = nullptr;
+}
+
+void MenuRenderer::clear_cache() {
+    for (auto& [scene, list] : cache_) {
+        forget_art(scene);
+        for (SDL_Texture* t : list)
+            if (t) {
+                hd_.erase(t);
+                SDL_DestroyTexture(t);
             }
     }
-    hd_batch_[scene] = batch;
-    L.start();
-    L.wake.notify_all();
-    // A short wait, so a page with few replacements shows them from its first frame.
-    const u64 t0 = SDL_GetTicksNS();
-    {
-        std::unique_lock lock(L.mutex);
-        L.finished.wait_for(lock, std::chrono::milliseconds(150), [&] {
-            return L.busy == 0 && std::none_of(L.jobs.begin(), L.jobs.end(), [&](const HdLoader::Job& j) { return j.batch == batch; });
-        });
-    }
-    const u64 t1 = SDL_GetTicksNS();
-    // (The textures are where apply_hd finds them: in cache_ or textures_ once this returns, so
-    // the results so far are put in here.)
-    std::deque<HdLoader::Done> mine;
-    {
-        std::lock_guard lock(L.mutex);
-        for (auto it = L.done.begin(); it != L.done.end();)
-            if (it->batch == batch) mine.push_back(std::move(*it)), it = L.done.erase(it);
-            else ++it;
-    }
-    size_t hd_count = 0, hd_bytes = 0;
-    for (HdLoader::Done& d : mine) {
-        hd_pending_.erase({scene, d.image});
-        if (!d.hd || !d.hd->width || !d.hd->height || d.hd->rgba.size() < size_t(d.hd->width) * d.hd->height) continue;
-        if (SDL_Texture* t = make_menu_texture(r_, *d.hd)) {
-            if (out[d.image]) SDL_DestroyTexture(out[d.image]);
-            out[d.image] = t;
-            hd_.insert(t);
-            ++hd_count, hd_bytes += d.hd->rgba.size() * 4;
+    cache_.clear();
+}
+
+// Nothing is made here: a page's file can hold hundreds of pictures (every maker's logos and
+// cars, 756 in the arcade menus) of which a screenful is drawn. Each texture is made when its
+// picture is first drawn (texture_at), from its HD replacement when the packs have one
+// (request_art).
+std::vector<SDL_Texture*> MenuRenderer::upload(const MenuScene* scene) {
+    forget_art(scene);
+    std::vector<SDL_Texture*> out(scene->images().size(), nullptr);
+    if (image_pack() && !out.empty()) {
+        HdLoader& L = HdLoader::get();
+        SceneArt art;
+        art.state.assign(out.size(), kArtNew);
+        {
+            std::lock_guard lock(L.mutex);
+            art.batch = L.next_batch++;
+            L.outstanding[art.batch] = 0;
         }
+        art_[scene] = std::move(art);
     }
-    const size_t left = std::count_if(hd_pending_.begin(), hd_pending_.end(), [&](const auto& k) { return k.first == scene; });
-    LOG_INFO("menu art: %zu images, %zu HD at once (%.0f MB; %.0f ms decoding, %.0f ms textures), %zu to follow",
-             images.size(), hd_count, double(hd_bytes) / 1048576.0, double(t1 - t0) / 1e6,
-             double(SDL_GetTicksNS() - t1) / 1e6, left);
     return out;
 }
 
@@ -286,53 +297,126 @@ std::vector<SDL_Texture*>* MenuRenderer::textures_of(const MenuScene* scene) {
     return it == cache_.end() ? nullptr : &it->second;
 }
 
-void MenuRenderer::forget_hd(const MenuScene* scene) {
+void MenuRenderer::forget_art(const MenuScene* scene) {
     if (!scene) return;
-    hd_batch_.erase(scene);
-    for (auto it = hd_pending_.lower_bound({scene, 0}); it != hd_pending_.end() && it->first == scene;)
-        it = hd_pending_.erase(it);
-    if (!hd_loader_) return;
-    std::lock_guard lock(hd_loader_->mutex);
-    auto& jobs = hd_loader_->jobs;
-    jobs.erase(std::remove_if(jobs.begin(), jobs.end(), [&](const HdLoader::Job& j) { return j.scene == scene; }), jobs.end());
-    auto& done = hd_loader_->done;
-    done.erase(std::remove_if(done.begin(), done.end(), [&](const HdLoader::Done& d) { return d.scene == scene; }), done.end());
+    for (auto it = art_failed_.lower_bound({scene, 0}); it != art_failed_.end() && it->first == scene;)
+        it = art_failed_.erase(it);
+    auto it = art_.find(scene);
+    if (it == art_.end()) return;
+    HdLoader::get().forget(it->second.batch);
+    art_.erase(it);
 }
 
-void MenuRenderer::want_hd(const MenuScene* scene, u32 image) {
-    if (!hd_loader_ || !hd_pending_.count({scene, image})) return;
-    std::lock_guard lock(hd_loader_->mutex);
-    for (HdLoader::Job& j : hd_loader_->jobs)
-        if (j.scene == scene && j.image == image) {
-            j.wanted = true;
-            break;
+SDL_Texture* MenuRenderer::texture_at(const MenuScene* scene, std::vector<SDL_Texture*>& list, u32 image) {
+    if (image >= list.size()) return nullptr;
+    if (list[image] || !scene) return list[image];
+    const std::vector<MenuImage>& images = scene->images();
+    if (image >= images.size() || images[image].rgba.empty() || art_failed_.count({scene, image})) return nullptr;
+    // Its replacement asked for, if it has not been (an element drawn outside a draw list).
+    if (auto a = art_.find(scene); a != art_.end() && a->second.state[image] == kArtNew) {
+        a->second.state[image] = kArtAsked;
+        HdLoader& L = HdLoader::get();
+        {
+            std::lock_guard lock(L.mutex);
+            ++L.outstanding[a->second.batch];
+            L.jobs.push_back({a->second.batch, image, images[image]});
+            L.start();
         }
+        L.wake.notify_one();
+    }
+    // The disc's picture meanwhile (and for good without a replacement).
+    list[image] = make_menu_texture(r_, images[image]);
+    if (!list[image]) art_failed_.insert({scene, image});
+    return list[image];
+}
+
+// Before a list is drawn: the replacements of its pictures not yet asked for go to the loader,
+// with a short wait for them (longer the first time a page's file is drawn, when the screen
+// is changing anyway; its pictures were given a head start when the file was loaded), so they
+// are there from the frame they first show in.
+void MenuRenderer::request_art(const std::vector<ElementDraw>& list, const RenderOptions& ro) {
+    apply_hd(8.0);
+    if (!ro.images) return;
+    std::vector<HdLoader::Job> ask;
+    std::vector<u64> batches;
+    bool opened = false;
+    const MenuScene* last = nullptr;
+    SceneArt* art = nullptr;
+    for (const ElementDraw& d : list) {
+        if (d.alpha <= 0.0f || d.kind != ElementDraw::Kind::Element || !d.element || !d.element->image) continue;
+        const MenuScene* scene = d.scene ? d.scene : scene_;
+        if (!scene) continue;
+        if (scene != last) {
+            last = scene;
+            (void)textures_for(d.scene); // (a scene first seen here gets its list, and its art_ entry)
+            auto it = art_.find(scene);
+            art = it == art_.end() ? nullptr : &it->second;
+            if (art && !art->opened) art->opened = opened = true;
+        }
+        const u32 i = d.element->image->image;
+        if (!art || i >= art->state.size() || art->state[i] != kArtNew) continue;
+        const MenuImage& img = scene->images()[i];
+        if (img.rgba.empty()) {
+            art->state[i] = kArtDone;
+            continue;
+        }
+        art->state[i] = kArtAsked;
+        ask.push_back({art->batch, i, img});
+        if (batches.empty() || batches.back() != art->batch) batches.push_back(art->batch);
+    }
+    if (ask.empty()) return;
+    HdLoader& L = HdLoader::get();
+    const u64 t0 = SDL_GetTicksNS();
+    const size_t asked = ask.size();
+    {
+        std::unique_lock lock(L.mutex);
+        for (HdLoader::Job& j : ask) {
+            ++L.outstanding[j.batch];
+            L.jobs.push_back(std::move(j));
+        }
+        L.start();
+        L.wake.notify_all();
+        L.finished.wait_for(lock, std::chrono::milliseconds(opened ? 120 : 6), [&] {
+            return std::all_of(batches.begin(), batches.end(), [&](u64 b) {
+                auto it = L.outstanding.find(b);
+                return it == L.outstanding.end() || it->second <= 0;
+            });
+        });
+    }
+    const u64 t1 = SDL_GetTicksNS();
+    const size_t hd_before = hd_.size();
+    apply_hd(opened ? 1000.0 : 8.0);
+    if (opened)
+        LOG_INFO("menu art: %zu pictures on screen, %zu HD (%.0f ms waiting, %.0f ms textures)", asked,
+                 hd_.size() - hd_before, double(t1 - t0) / 1e6, double(SDL_GetTicksNS() - t1) / 1e6);
 }
 
 void MenuRenderer::apply_hd(double budget_ms) {
-    if (!hd_loader_ || hd_pending_.empty()) return;
+    if (art_.empty()) return;
+    HdLoader& L = HdLoader::get();
     const u64 t0 = SDL_GetTicksNS();
-    for (;;) {
-        HdLoader::Done d;
-        {
-            std::lock_guard lock(hd_loader_->mutex);
-            if (hd_loader_->done.empty()) return;
-            d = std::move(hd_loader_->done.front());
-            hd_loader_->done.pop_front();
-        }
-        auto b = hd_batch_.find(d.scene);
-        if (b == hd_batch_.end() || b->second != d.batch) continue; // (that upload is gone)
-        hd_pending_.erase({d.scene, d.image});
-        std::vector<SDL_Texture*>* list = textures_of(d.scene);
-        if (list && d.image < list->size() && d.hd && d.hd->width && d.hd->height &&
-            d.hd->rgba.size() >= size_t(d.hd->width) * d.hd->height)
-            if (SDL_Texture* t = make_menu_texture(r_, *d.hd)) {
-                SDL_Texture*& slot = (*list)[d.image];
-                if (slot) hd_.erase(slot), SDL_DestroyTexture(slot);
-                slot = t;
-                hd_.insert(t);
+    for (auto& [scene, art] : art_) {
+        for (;;) {
+            HdLoader::Done d;
+            {
+                std::lock_guard lock(L.mutex);
+                auto it = std::find_if(L.done.begin(), L.done.end(), [&](const HdLoader::Done& x) { return x.batch == art.batch; });
+                if (it == L.done.end()) break;
+                d = std::move(*it);
+                L.done.erase(it);
             }
-        if (double(SDL_GetTicksNS() - t0) / 1e6 >= budget_ms) return;
+            if (d.image < art.state.size()) art.state[d.image] = kArtDone;
+            std::vector<SDL_Texture*>* list = textures_of(scene);
+            if (list && d.image < list->size() && d.hd && d.hd->width && d.hd->height &&
+                d.hd->rgba.size() >= size_t(d.hd->width) * d.hd->height)
+                if (SDL_Texture* t = make_menu_texture(r_, *d.hd)) {
+                    SDL_Texture*& slot = (*list)[d.image];
+                    if (slot) hd_.erase(slot), SDL_DestroyTexture(slot);
+                    slot = t;
+                    hd_.insert(t);
+                }
+            if (double(SDL_GetTicksNS() - t0) / 1e6 >= budget_ms) return;
+        }
     }
 }
 
@@ -345,7 +429,7 @@ void MenuRenderer::set_scene(const MenuScene* scene) {
     if (scene) textures_ = upload(scene);
 }
 
-const std::vector<SDL_Texture*>& MenuRenderer::textures_for(const MenuScene* scene) {
+std::vector<SDL_Texture*>& MenuRenderer::textures_for(const MenuScene* scene) {
     if (!scene || scene == scene_) return textures_;
     auto it = cache_.find(scene);
     if (it == cache_.end()) it = cache_.emplace(scene, upload(scene)).first;
@@ -354,7 +438,7 @@ const std::vector<SDL_Texture*>& MenuRenderer::textures_for(const MenuScene* sce
 
 void MenuRenderer::draw_elements(const std::vector<ElementDraw>& list, const RenderOptions& ro,
                                  const SDL_FRect& dst) {
-    apply_hd(8.0);
+    request_art(list, ro);
     SDL_Rect old_clip;
     bool had_clip = SDL_RenderClipEnabled(r_);
     SDL_GetRenderClipRect(r_, &old_clip);
@@ -410,7 +494,8 @@ MenuRenderer::Sharp MenuRenderer::sharp(const ElementDraw& d, const RenderOption
     if (d.overlay || (d.widget && e.widget_class && !e.widget_class->empty())) return Sharp::No;
     if (e.image && !d.hide_parts && ro.images) {
         const std::vector<SDL_Texture*>& textures = textures_for(d.scene);
-        if (e.image->image < textures.size() && hd_.count(textures[e.image->image])) return Sharp::Yes;
+        if (e.image->image < textures.size() && textures[e.image->image] && hd_.count(textures[e.image->image]))
+            return Sharp::Yes;
     }
     if (e.text && ro.text && text_hd_ && text_hd_(*e.text)) return Sharp::Yes;
     // The disc's pixels look the same scaled up before or after: with the run around them.
@@ -419,7 +504,12 @@ MenuRenderer::Sharp MenuRenderer::sharp(const ElementDraw& d, const RenderOption
 
 void MenuRenderer::draw(int page, const SceneOptions& so, const RenderOptions& ro, const SDL_FRect& dst) {
     if (!scene_) return;
-    apply_hd(8.0);
+    const std::vector<DrawItem> items = scene_->draw_list(page, so);
+    {
+        std::vector<ElementDraw> ask(items.size());
+        for (size_t i = 0; i < items.size(); ++i) ask[i].element = items[i].element;
+        request_art(ask, ro);
+    }
     SDL_Rect old_clip;
     bool had_clip = SDL_RenderClipEnabled(r_);
     SDL_GetRenderClipRect(r_, &old_clip);
@@ -427,7 +517,7 @@ void MenuRenderer::draw(int page, const SceneOptions& so, const RenderOptions& r
     SDL_SetRenderClipRect(r_, &clip);
     SDL_SetRenderDrawBlendMode(r_, SDL_BLENDMODE_BLEND);
     drawing_ = scene_;
-    for (const DrawItem& it : scene_->draw_list(page, so)) draw_element(*it.element, it.widget, ro, dst);
+    for (const DrawItem& it : items) draw_element(*it.element, it.widget, ro, dst);
     drawing_ = nullptr;
     SDL_SetRenderClipRect(r_, had_clip ? &old_clip : nullptr);
 }
@@ -438,7 +528,7 @@ void MenuRenderer::draw_element(const Element& e, bool widget, const RenderOptio
     draw_element(e, textures_, t, ro, dst);
 }
 
-void MenuRenderer::draw_element(const Element& e, const std::vector<SDL_Texture*>& textures, const ElementDraw& t,
+void MenuRenderer::draw_element(const Element& e, std::vector<SDL_Texture*>& textures, const ElementDraw& t,
                                 const RenderOptions& ro, const SDL_FRect& dst) {
     const bool widget = t.widget;
     const float sx = dst.w / kMenuWidth, sy = dst.h / kMenuHeight;
@@ -463,10 +553,7 @@ void MenuRenderer::draw_element(const Element& e, const std::vector<SDL_Texture*
         widget_(r_, e, SDL_FRect{left, top, right - left, bottom - top}, t.alpha);
 
     SDL_Texture* tex = nullptr;
-    if (e.image && ro.images && e.image->image < textures.size()) {
-        tex = textures[e.image->image];
-        if (tex && !hd_pending_.empty() && !hd_.count(tex)) want_hd(drawing_ ? drawing_ : scene_, e.image->image);
-    }
+    if (e.image && ro.images) tex = texture_at(drawing_ ? drawing_ : scene_, textures, e.image->image);
     if ((e.colors || tex || t.has_colors) && !t.hide_parts) {
         SDL_Vertex v[4];
         for (int i = 0; i < 4; ++i) {

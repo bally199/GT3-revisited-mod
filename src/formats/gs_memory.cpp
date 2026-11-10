@@ -159,24 +159,39 @@ void GsMemory::upload(u32 dbp, u32 dbw, u32 dpsm, u32 w, u32 h, ByteSpan src) {
     if (u64(w) * h * bits / 8 > src.size()) throw FormatError("texture upload larger than source data");
     u8* m = mem_.data();
     size_t i = 0; // pixel index
+    u32 lo = kBytes, hi = 0; // byte addresses written (4 bytes at most from each)
+    auto wrote = [&](u32 byte) {
+        if (byte < lo) lo = byte;
+        if (byte > hi) hi = byte;
+        return byte;
+    };
     for (u32 y = 0; y < h; ++y) {
         for (u32 x = 0; x < w; ++x, ++i) {
             switch (dpsm) {
-            case 0x00: std::memcpy(m + addr32(dbp, dbw, x, y) * 4, &src[i * 4], 4); break;
-            case 0x01: std::memcpy(m + addr32(dbp, dbw, x, y) * 4, &src[i * 3], 3); break;
+            case 0x00: std::memcpy(m + wrote(addr32(dbp, dbw, x, y) * 4), &src[i * 4], 4); break;
+            case 0x01: std::memcpy(m + wrote(addr32(dbp, dbw, x, y) * 4), &src[i * 3], 3); break;
             case 0x02:
-            case 0x0A: std::memcpy(m + addr16(dbp, dbw, x, y) * 2, &src[i * 2], 2); break;
-            case 0x13: m[addr8(dbp, dbw, x, y)] = src[i]; break;
+            case 0x0A: std::memcpy(m + wrote(addr16(dbp, dbw, x, y) * 2), &src[i * 2], 2); break;
+            case 0x13: m[wrote(addr8(dbp, dbw, x, y))] = src[i]; break;
             case 0x14: {
                 u32 nib = (src[i >> 1] >> ((i & 1) * 4)) & 0xF;
                 u32 a = addr4(dbp, dbw, x, y);
-                u8& b = m[a >> 1];
+                u8& b = m[wrote(a >> 1)];
                 b = (a & 1) ? u8((b & 0x0F) | (nib << 4)) : u8((b & 0xF0) | nib);
                 break;
             }
             }
         }
     }
+    if (hi >= lo) {
+        dirty_lo_ = std::min(dirty_lo_, lo);
+        dirty_hi_ = std::max(dirty_hi_, std::min(hi + 4, kBytes));
+    }
+}
+
+void GsMemory::reset() {
+    if (dirty_hi_ > dirty_lo_) std::memset(mem_.data() + dirty_lo_, 0, dirty_hi_ - dirty_lo_);
+    dirty_lo_ = kBytes, dirty_hi_ = 0;
 }
 
 u32 GsMemory::read_texel(u32 bp, u32 bw, u32 psm, u32 x, u32 y) const {

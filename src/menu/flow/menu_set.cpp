@@ -1,5 +1,7 @@
 #include "menu/flow/menu_set.h"
 
+#include "menu/menu_renderer.h"
+
 #include <SDL3/SDL_timer.h>
 
 #include "base/log.h"
@@ -35,6 +37,7 @@ const MenuScene* MenuSet::scene(int n) const {
     const u64 t0 = SDL_GetTicksNS();
     try {
         if (auto data = reader_(path)) s = std::make_unique<MenuScene>(MenuScene::load(*data, path));
+        if (s) MenuRenderer::warm(*s); // (its art's replacements get a head start on the screen change)
         if (s) LOG_INFO("menu: %s loaded in %.0f ms (%zu images)", path.c_str(), double(SDL_GetTicksNS() - t0) / 1e6,
                         s->images().size());
         else LOG_WARN("menu: cannot load [%s]", path.c_str());
