@@ -36,6 +36,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <condition_variable>
 #include <list>
 #include <mutex>
 #include <set>
@@ -253,6 +254,17 @@ bool App::init(int argc, char** argv) {
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--no-vr") gpu_opts.xr = false;
 #endif
+    // [video] program_cache: on / off (default: on for the Xbox, where linking the 3D programs
+    // held the first race's loading up by 1.7 s; off elsewhere).
+    {
+#if GT3R_UWP
+        const char* fallback = "on";
+#else
+        const char* fallback = "off";
+#endif
+        if (to_lower(config_.get("video", "program_cache").value_or(fallback)) == "on")
+            gpu_opts.program_cache = data_dir_ + "shader_cache";
+    }
     if (use_gpu) gpu_ = render::GpuContext::create(window_, gpu_opts);
 #if GT3R_XR
     if (gpu_ && gpu_->xr()) {
@@ -605,6 +617,10 @@ void App::apply_texture_packs() {
     if (!gpu_) return;
     const bool dump = to_lower(config_.get("video", "texture_dump").value_or("off")) == "on";
     const bool packs = to_lower(config_.get("video", "texture_packs").value_or("on")) != "off"; // Settings: HD textures
+    // (The hooks off first: the menus' loader threads look names up in the packs' list, which
+    // set_texture_packs rebuilds; set_image_pack waits for their calls to end.)
+    menu::MenuRenderer::set_image_pack({});
+    text::GameFonts::set_atlas_pack({});
     host_make_dir(data_dir_ + "textures");
     host_make_dir(data_dir_ + "movies_hd"); // HD movies outside the mods (video::open_movie)
     video::set_hd_movie_folder(data_dir_ + "movies_hd");
@@ -626,8 +642,10 @@ void App::apply_texture_packs() {
     // back to a page takes them from memory instead of reading and decoding the PNGs again.
     struct Decoded {
         std::mutex mutex;
+        std::condition_variable changed;
         std::list<std::string> order;
-        std::unordered_map<std::string, std::pair<menu::MenuImage, std::list<std::string>::iterator>> images;
+        std::unordered_map<std::string, std::pair<std::shared_ptr<const menu::MenuImage>, std::list<std::string>::iterator>> images;
+        std::set<std::string> decoding; // under way on some thread: others wait for it
         size_t bytes = 0;
     };
     constexpr size_t kDecodedBudget = size_t(384) << 20;
@@ -651,14 +669,35 @@ void App::apply_texture_packs() {
             if (!packs) return std::nullopt;
             const std::string* file = gpu_->texture_pack_file(name);
             if (!file) return std::nullopt;
+            // From the cache; or decoded here, unless another thread is at this very picture
+            // (the head start a page's file gives its largest pictures): then that one's.
+            std::shared_ptr<const menu::MenuImage> kept;
             {
-                std::lock_guard lock(decoded->mutex);
-                auto it = decoded->images.find(name);
-                if (it != decoded->images.end()) {
-                    decoded->order.splice(decoded->order.begin(), decoded->order, it->second.second);
-                    return it->second.first;
+                std::unique_lock lock(decoded->mutex);
+                for (;;) {
+                    auto it = decoded->images.find(name);
+                    if (it != decoded->images.end()) {
+                        decoded->order.splice(decoded->order.begin(), decoded->order, it->second.second);
+                        kept = it->second.first;
+                        break;
+                    }
+                    if (!decoded->decoding.count(name)) break;
+                    decoded->changed.wait(lock);
                 }
+                if (!kept) decoded->decoding.insert(name);
             }
+            if (kept) return *kept; // (the copy outside the lock)
+            struct Finish { // (whatever happens below, the waiters go on)
+                Decoded& d;
+                const std::string& name;
+                ~Finish() {
+                    {
+                        std::lock_guard lock(d.mutex);
+                        d.decoding.erase(name);
+                    }
+                    d.changed.notify_all();
+                }
+            } finish{*decoded, name};
             try {
                 if (std::optional<Bytes> data = read_host_file(*file)) {
                     PngImage png = decode_png(*data);
@@ -666,14 +705,15 @@ void App::apply_texture_packs() {
                     menu::MenuImage hd{png.width, png.height, std::move(png.rgba)};
                     const size_t size = hd.rgba.size() * sizeof(hd.rgba[0]);
                     if (size <= kDecodedBudget / 4) {
+                        auto copy = std::make_shared<const menu::MenuImage>(hd);
                         std::lock_guard lock(decoded->mutex);
                         if (!decoded->images.count(name)) {
                             decoded->order.push_front(name);
-                            decoded->images.emplace(name, std::make_pair(hd, decoded->order.begin()));
+                            decoded->images.emplace(name, std::make_pair(std::move(copy), decoded->order.begin()));
                             decoded->bytes += size;
                             while (decoded->bytes > kDecodedBudget && decoded->order.size() > 1) {
                                 auto old = decoded->images.find(decoded->order.back());
-                                decoded->bytes -= old->second.first.rgba.size() * sizeof(old->second.first.rgba[0]);
+                                decoded->bytes -= old->second.first->rgba.size() * sizeof(old->second.first->rgba[0]);
                                 decoded->images.erase(old);
                                 decoded->order.pop_back();
                             }

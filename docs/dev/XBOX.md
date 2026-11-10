@@ -127,6 +127,33 @@ upload the `.iso` there, and pick it from there (the app always reaches its own 
   the other variants for tests: 2 finish after every pass and blit, 4 flush there, 8 finish at
   submits (any platform), 16 flush there.
 
+- **A program cache** (`[video] program_cache`, on by default here): the 3D programs' binaries
+  are kept in `shader_cache\` in the data folder and loaded from it instead of being linked.
+  Through ANGLE a link compiles the shaders for Direct3D, about 0.2 s a program on the console:
+  the first race of a session loaded 1.7 s longer for it. The files are named after the
+  shaders' sources and the context, so a new build or system update makes new ones; one the
+  context refuses is linked as before and written again. The log says how the programs came
+  about (`OpenGL ES: programs: 9 from the cache, 0 linked`).
+
+## Menu pages' loading
+
+What made a page's opening stutter, and what is done about each:
+
+- **The page's file** (`MenuScene::load`): its pictures are decoded on up to 8 threads, each
+  reusing one GS memory (a new, zeroed 4 MB one per picture was most of the 0.3 to 0.5 s the
+  larger files took: `arcade1.pmb` has 756 pictures).
+- **Textures**: made when a picture is first drawn, not for the whole file (the dealers' file
+  has every maker's logos and cars: 131 pictures, 931 MB of HD art at 4x, of which a screenful
+  shows).
+- **HD replacements**: decoded on a pool of threads shared by every menu renderer. A file's
+  largest pictures get a head start when the file is loaded (`MenuRenderer::warm`), while the
+  screen change still plays; the list about to be drawn waits for its own pictures (at most
+  120 ms the first time a file is drawn, 6 ms later on), and the disc's picture stands in for
+  one that is not ready. One full-screen picture at 4x (2560 x 1792) takes about 150 ms to
+  inflate, which nothing but a smaller or differently stored picture shortens.
+- The log's `menu: <file> loaded in N ms` and `menu art: N pictures on screen, M HD (X ms
+  waiting, Y ms textures)` lines say where a page's time went.
+
 ## Testing switches
 
 `args.txt` in the data folder (one argument per line, read at start) takes `--env NAME=value`

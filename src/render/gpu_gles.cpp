@@ -14,6 +14,7 @@
 
 #if GT3R_GLES
 
+#include "base/file.h"
 #include "base/log.h"
 
 #define GL_GLES_PROTOTYPES 0 // the functions come from the context (load_gl)
@@ -24,6 +25,7 @@
 #include <cstring>
 #include <deque>
 #include <map>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -134,12 +136,18 @@ namespace {
 GT3R_GL_FUNCTIONS(X)
 #undef X
 
+// Program binaries (the program cache): used when the context has them.
+PFNGLGETPROGRAMBINARYPROC glGetProgramBinary = nullptr;
+PFNGLPROGRAMBINARYPROC glProgramBinary = nullptr;
+
 bool load_gl() {
 #define X(type, name)                                                         \
     name = reinterpret_cast<type>(SDL_GL_GetProcAddress(#name));             \
     if (!name) return SDL_SetError("OpenGL ES: the driver has no %s", #name);
     GT3R_GL_FUNCTIONS(X)
 #undef X
+    glGetProgramBinary = reinterpret_cast<PFNGLGETPROGRAMBINARYPROC>(SDL_GL_GetProcAddress("glGetProgramBinary"));
+    glProgramBinary = reinterpret_cast<PFNGLPROGRAMBINARYPROC>(SDL_GL_GetProcAddress("glProgramBinary"));
     return true;
 }
 
@@ -149,6 +157,12 @@ namespace {
 
 constexpr int kSlots = 4;              // uniform buffers per stage; fragment samplers
 constexpr GLuint kFragmentUboBase = 4; // uniform binding points: vertex 0..3, fragment 4..7
+
+Uint64 fnv64(const void* data, size_t size, Uint64 h) {
+    const Uint8* p = static_cast<const Uint8*>(data);
+    for (size_t i = 0; i < size; ++i) h = (h ^ p[i]) * 0x100000001b3ull;
+    return h;
+}
 
 std::vector<std::string> split_names(const char* s) {
     std::vector<std::string> out;
@@ -288,6 +302,7 @@ struct SDL_GPUSampler {
 
 struct SDL_GPUShader {
     GLuint shader = 0;
+    Uint64 source_hash = 0; // of its GLSL (the program cache's key)
     SDL_GPUShaderStage stage = SDL_GPU_SHADERSTAGE_VERTEX;
     std::vector<std::string> blocks, samplers; // names in slot order
     Uint32 num_uniform_buffers = 0, num_samplers = 0;
@@ -365,6 +380,13 @@ struct SDL_GPUDevice {
     double gpu_ms = -1;
     int log_frames = 0;
     double log_total = 0;
+    struct CachedProgram {
+        std::string file;
+        GLint saved_size = 0;
+    };
+    std::map<GLuint, CachedProgram> cached_programs; // the program cache's (program_for)
+    int programs_loaded = 0, programs_linked = 0;
+    double program_ms = 0;
     Uint64 submit_ns = 0;  // CPU time in run_pass this frame (our GL calls, ANGLE's work for them)
     double log_submit = 0; // its sum over the log's frames (ms)
     std::map<std::string, std::pair<double, double>> log_passes; // key -> ms, draws (summed)
@@ -396,6 +418,8 @@ struct SDL_GPUDevice {
 namespace {
 
 SDL_GPUDevice* g_device = nullptr; // while the OpenGL ES device is in use (gles::create_device)
+std::string g_program_cache;       // the program cache's folder, with its trailing separator; empty: none
+void save_program(GLuint prog, const std::string& file, GLint& saved_size);
 
 } // namespace
 
@@ -921,6 +945,24 @@ void set_probe(int bits) {
 
 double gpu_ms() { return g_device ? g_device->gpu_ms : -1; }
 
+void set_program_cache(const std::string& folder) {
+    g_program_cache = folder;
+    if (!g_program_cache.empty() && g_program_cache.back() != '/' && g_program_cache.back() != '\\') g_program_cache += '/';
+    if (!g_program_cache.empty()) gt3r::host_make_dir(g_program_cache);
+}
+
+void save_programs() {
+    if (!g_device || !g_device->renderer || g_program_cache.empty() || g_device->cached_programs.empty()) return;
+    begin_gl(g_device);
+    for (auto& [prog, c] : g_device->cached_programs) save_program(prog, c.file, c.saved_size);
+    if (g_device->programs_loaded + g_device->programs_linked) {
+        LOG_INFO("OpenGL ES: programs: %d from the cache, %d linked, %.0f ms", g_device->programs_loaded,
+                 g_device->programs_linked, g_device->program_ms);
+        g_device->programs_loaded = g_device->programs_linked = 0;
+        g_device->program_ms = 0;
+    }
+}
+
 void finish() {
     if (!g_device || !g_device->renderer) return;
     begin_gl(g_device);
@@ -1174,6 +1216,7 @@ SDL_GPUShader* gt3r_gl_CreateGPUShader(SDL_GPUDevice* device, const SDL_GPUShade
     }
     auto* s = new SDL_GPUShader();
     s->shader = sh;
+    s->source_hash = fnv64(info->code, info->code_size, 0xcbf29ce484222325ull);
     s->stage = info->stage;
     s->num_uniform_buffers = info->num_uniform_buffers;
     s->num_samplers = info->num_samplers;
@@ -1192,21 +1235,86 @@ void gt3r_gl_ReleaseGPUShader(SDL_GPUDevice* device, SDL_GPUShader* shader) {
 
 namespace {
 
+// The program cache: linked programs' binaries kept in a folder, loaded instead of linking the
+// next time. Through ANGLE linking is where the shaders are compiled for Direct3D (about 0.1 s a
+// program on an Xbox: 1.7 s the first time a race loaded); a binary loads in a few ms. A file
+// is named after the two shaders' sources and the context (a new ANGLE or driver: new files),
+// and one the context does not take is linked as before and written again.
+std::string program_file(const SDL_GPUDevice* dev, const SDL_GPUShader* vs, const SDL_GPUShader* fs) {
+    Uint64 h = fnv64(&vs->source_hash, sizeof vs->source_hash, 0xcbf29ce484222325ull);
+    h = fnv64(&fs->source_hash, sizeof fs->source_hash, h);
+    h = fnv64(dev->description.data(), dev->description.size(), h);
+    char name[32];
+    SDL_snprintf(name, sizeof name, "%016llx.bin", static_cast<unsigned long long>(h));
+    return g_program_cache + name;
+}
+
+// The program from its cached binary, or 0.
+GLuint load_program(const std::string& file) {
+    if (!glProgramBinary) return 0;
+    std::optional<gt3r::Bytes> data = gt3r::read_host_file(file);
+    if (!data || data->size() <= 4) return 0;
+    GLenum format = 0;
+    std::memcpy(&format, data->data(), 4);
+    GLuint prog = glCreateProgram();
+    glProgramBinary(prog, format, data->data() + 4, GLsizei(data->size() - 4));
+    GLint ok = 0;
+    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+    while (glGetError() != GL_NO_ERROR) { // (a binary of another build: an error, and a link below)
+    }
+    if (ok) return prog;
+    glDeleteProgram(prog);
+    return 0;
+}
+
+// Writes the program's binary when it is not the size of the one on file (ANGLE adds the
+// variants it compiles on first draws: save_programs()).
+void save_program(GLuint prog, const std::string& file, GLint& saved_size) {
+    if (!glGetProgramBinary || file.empty()) return;
+    GLint size = 0;
+    glGetProgramiv(prog, GL_PROGRAM_BINARY_LENGTH, &size);
+    if (size <= 0 || size == saved_size) return;
+    gt3r::Bytes out(size_t(size) + 4);
+    GLsizei got = 0;
+    GLenum format = 0;
+    glGetProgramBinary(prog, size, &got, &format, out.data() + 4);
+    while (glGetError() != GL_NO_ERROR) {
+    }
+    if (got <= 0) return;
+    out.resize(size_t(got) + 4);
+    std::memcpy(out.data(), &format, 4);
+    if (gt3r::write_host_file(file, out)) saved_size = size;
+}
+
 GLuint program_for(SDL_GPUDevice* dev, const SDL_GPUShader* vs, const SDL_GPUShader* fs) {
     const auto key = std::make_pair(vs->shader, fs->shader);
     if (auto it = dev->programs.find(key); it != dev->programs.end()) return it->second;
-    GLuint prog = glCreateProgram();
-    glAttachShader(prog, vs->shader);
-    glAttachShader(prog, fs->shader);
-    glLinkProgram(prog);
-    GLint ok = 0;
-    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        char log[2048] = {};
-        glGetProgramInfoLog(prog, sizeof(log), nullptr, log);
-        SDL_SetError("GLSL ES link: %s", log);
-        glDeleteProgram(prog);
-        return 0;
+    const std::string file = g_program_cache.empty() ? std::string() : program_file(dev, vs, fs);
+    const Uint64 t0 = SDL_GetTicksNS();
+    GLuint prog = file.empty() ? 0 : load_program(file);
+    const bool cached = prog != 0;
+    if (!prog) {
+        prog = glCreateProgram();
+        glAttachShader(prog, vs->shader);
+        glAttachShader(prog, fs->shader);
+        glLinkProgram(prog);
+        GLint ok = 0;
+        glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+        if (!ok) {
+            char log[2048] = {};
+            glGetProgramInfoLog(prog, sizeof(log), nullptr, log);
+            SDL_SetError("GLSL ES link: %s", log);
+            glDeleteProgram(prog);
+            return 0;
+        }
+    }
+    if (!file.empty()) {
+        SDL_GPUDevice::CachedProgram& c = dev->cached_programs[prog];
+        c.file = file;
+        if (cached) glGetProgramiv(prog, GL_PROGRAM_BINARY_LENGTH, &c.saved_size);
+        else save_program(prog, file, c.saved_size);
+        dev->program_ms += double(SDL_GetTicksNS() - t0) / 1e6;
+        ++(cached ? dev->programs_loaded : dev->programs_linked);
     }
     // Uniform blocks to binding points by slot; samplers to texture units by slot.
     for (size_t i = 0; i < vs->blocks.size(); ++i) {

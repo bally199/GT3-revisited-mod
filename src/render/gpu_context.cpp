@@ -137,6 +137,7 @@ bool GpuContext::open_gles(SDL_Window* window, const GpuOptions& options) {
     gles_ = true;
     if (!options.base_vertex) gles::disable_base_vertex();
     if (options.gles_probe) gles::set_probe(options.gles_probe);
+    gles::set_program_cache(options.program_cache);
     return true;
 #else
     (void)window;
@@ -507,6 +508,13 @@ void GpuContext::warm_pipelines_now() {
         made += build_pipeline(k);
     }
     LOG_INFO("3D pipelines warmed: %d in %.0f ms", made, double(SDL_GetTicksNS() - t0) / 1e6);
+    save_program_cache();
+}
+
+void GpuContext::save_program_cache() {
+#if GT3R_GLES
+    if (gles_) gles::save_programs();
+#endif
 }
 
 bool GpuContext::build_pipeline(const PipelineKey& key) {

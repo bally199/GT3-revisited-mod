@@ -97,6 +97,7 @@ RaceScreen::RaceScreen(const OnlineLaunch& l) : preset_(read_preset()) {
 RaceScreen::~RaceScreen() {
     if (loading_own_) SDL_DestroyTexture(loading_own_);
     if (!app_) return;
+    if (app_->gpu()) app_->gpu()->save_program_cache(); // (with what this race's first draws compiled)
     app_->remember_race_scale();
     silence(*app_);
     music_.stop(app_->audio());

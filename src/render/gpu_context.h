@@ -108,6 +108,10 @@ struct GpuOptions {
     bool base_vertex = true;
     bool spin_copies = true;
     int gles_probe = 0; // OpenGL ES diagnostic probes (gles::set_probe; [video] gles_probe)
+    // OpenGL ES: a folder for the linked programs' binaries, loaded from it instead of linking
+    // the next time (through ANGLE a link compiles the shaders for Direct3D: ~0.1 s a program
+    // on an Xbox). "": none.
+    std::string program_cache;
     // VR builds (GT3R_XR): create the device through the headset's OpenXR runtime when there is
     // one; the 2D renderer then draws offscreen (canvases of xr::Session) instead of the window.
     bool xr = false;
@@ -189,6 +193,9 @@ public:
     // (again after an MSAA change), at a point that waits anyway (a race's loading). Otherwise the
     // first draw needing one stalled its frame, up to ~400 ms on the Xbox.
     void warm_pipelines_now();
+    // OpenGL ES: the program cache (GpuOptions::program_cache) brought up to date with the
+    // variants the driver has compiled since (after a first race, say).
+    void save_program_cache();
     // no_mips: the full-size image only (GS MXL 0), linear, no anisotropy.
     SDL_GPUSampler* sampler(bool clamp_u, bool clamp_v, bool no_mips = false) const {
         return samplers_[(clamp_u ? 1 : 0) | (clamp_v ? 2 : 0) | (no_mips ? 4 : 0)];

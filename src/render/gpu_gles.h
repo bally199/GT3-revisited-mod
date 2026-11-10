@@ -16,6 +16,7 @@
 // clip-space depth range is [0, 1] (the generated vertex shaders flip y and remap z for
 // GL; front faces are flipped to match).
 
+#include <string>
 #include <SDL3/SDL.h>
 
 #if GT3R_GLES
@@ -45,6 +46,12 @@ double frame_fence();
 // The GPU time of the passes and blits of a recent frame, in ms (Xbox: time-elapsed queries,
 // read a few frames late); -1 when not measured.
 double gpu_ms();
+// The program cache: linked programs' binaries kept in `folder` (made if missing) and loaded from
+// it instead of linking; "" (the default): none. Set before the device's first pipeline.
+void set_program_cache(const std::string& folder);
+// Writes the binaries that have grown since they were saved (the variants a driver compiles on
+// first draws), and logs how the programs made since the last call came about.
+void save_programs();
 // glFinish (diagnostics).
 void finish();
 // Draws without glDrawElementsInstancedBaseVertex from now on (GpuOptions::base_vertex).
