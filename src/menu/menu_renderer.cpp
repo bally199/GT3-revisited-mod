@@ -143,18 +143,25 @@ struct MenuRenderer::HdLoader {
         static HdLoader loader;
         return loader;
     }
-    ~HdLoader() {
+    ~HdLoader() { stop_threads(); }
+    // The threads ended (the App shutting down: before what the pack hook refers to goes, and
+    // not left to the statics' destruction). A later job starts them again.
+    void stop_threads() {
+        std::vector<std::thread> ending;
         {
             std::lock_guard lock(mutex);
             stop = true;
             jobs.clear();
             warm_jobs.clear();
+            ending.swap(threads);
         }
         wake.notify_all();
-        for (std::thread& t : threads) t.join();
+        for (std::thread& t : ending) t.join();
+        std::lock_guard lock(mutex);
+        stop = false;
     }
     void start() { // (mutex held)
-        if (!threads.empty()) return;
+        if (!threads.empty() || stop) return;
         const unsigned n = std::clamp(std::thread::hardware_concurrency(), 2u, 8u) - 1;
         for (unsigned k = 0; k < n; ++k) threads.emplace_back([this] { run(); });
     }
@@ -208,6 +215,8 @@ void MenuRenderer::set_image_pack(ImagePack pack) {
     }
     HdLoader::get().quiesce();
 }
+void MenuRenderer::stop_loader() { HdLoader::get().stop_threads(); }
+
 void MenuRenderer::warm(const MenuScene& scene) {
     if (!image_pack()) return;
     // The largest first (a full-screen picture's replacement is the slowest to decode: ~150 ms
@@ -395,12 +404,15 @@ void MenuRenderer::apply_hd(double budget_ms) {
     if (art_.empty()) return;
     HdLoader& L = HdLoader::get();
     const u64 t0 = SDL_GetTicksNS();
-    for (auto& [scene, art] : art_) {
+    for (auto& entry : art_) {
+        const MenuScene* scene = entry.first;
+        SceneArt& art = entry.second;
+        const u64 batch = art.batch;
         for (;;) {
             HdLoader::Done d;
             {
                 std::lock_guard lock(L.mutex);
-                auto it = std::find_if(L.done.begin(), L.done.end(), [&](const HdLoader::Done& x) { return x.batch == art.batch; });
+                auto it = std::find_if(L.done.begin(), L.done.end(), [batch](const HdLoader::Done& x) { return x.batch == batch; });
                 if (it == L.done.end()) break;
                 d = std::move(*it);
                 L.done.erase(it);

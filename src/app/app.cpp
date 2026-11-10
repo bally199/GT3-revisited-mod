@@ -1844,6 +1844,7 @@ bool App::show_song() const { return to_lower(config_.get("music", "show_song").
 void App::shutdown() {
     music_.cancel(); // a folder scan's thread reads files through SDL
     menu::MenuRenderer::set_image_pack({}); // (they refer to this App)
+    menu::MenuRenderer::stop_loader();
     text::GameFonts::set_atlas_pack({});
     if (movie_dump_.joinable()) movie_dump_.join();
     remember_race_scale();

@@ -144,6 +144,8 @@ public:
     // A head start for a scene about to be shown (its file just loaded): its largest pictures'
     // replacements are decoded in the background into the pack's cache.
     static void warm(const MenuScene& scene);
+    // Ends the loader's threads (at shutdown, after the hook is cleared).
+    static void stop_loader();
     static const ImagePack& image_pack();
 
     // Draws `page` so that the 640x448 menu space maps onto `dst`.
